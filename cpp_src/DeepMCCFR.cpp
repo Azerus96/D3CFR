@@ -1,5 +1,3 @@
-// D2CFR-main/cpp_src/DeepMCCFR.cpp
-
 #include "DeepMCCFR.hpp"
 #include <stdexcept>
 #include <iostream>
@@ -62,9 +60,7 @@ std::vector<float> DeepMCCFR::featurize(const GameState& state) {
     };
     
     process_board(my_board, offset);
-    // ИСПРАВЛЕНО: Удалено `offset += 13 * 53;`
     process_board(opp_board, offset);
-    // ИСПРАВЛЕНО: Удалено `offset += 13 * 53;`
 
     const auto& my_discards = state.get_my_discards(player);
     for (Card c : my_discards) {
@@ -88,7 +84,8 @@ std::map<int, float> DeepMCCFR::traverse(GameState state, int traversing_player,
     
     const size_t ACTION_LIMIT = (state.get_street() == 1) ? 100 : 200;
     if (legal_actions.size() > ACTION_LIMIT) {
-        std::shuffle(legal_actions.begin(), legal_actions.end(), GameState::get_rng());
+        // ИЗМЕНЕНО: Вызов get_rng() теперь осуществляется через объект state.
+        std::shuffle(legal_actions.begin(), legal_actions.end(), state.get_rng());
         legal_actions.resize(ACTION_LIMIT);
     }
     
@@ -98,7 +95,8 @@ std::map<int, float> DeepMCCFR::traverse(GameState state, int traversing_player,
     }
 
     if (current_player != traversing_player) {
-        int action_idx = GameState::get_rng()() % num_actions;
+        // ИЗМЕНЕНО: Вызов get_rng() теперь осуществляется через объект state.
+        int action_idx = state.get_rng()() % num_actions;
         return traverse(state.apply_action(legal_actions[action_idx]), traversing_player, samples);
     }
 
