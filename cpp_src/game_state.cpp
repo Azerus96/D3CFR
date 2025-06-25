@@ -1,6 +1,6 @@
 #include "game_state.hpp"
 
 namespace ofc {
-    // === ВОЗВРАЩАЕМ ОБЫЧНОЕ ОПРЕДЕЛЕНИЕ ===
-    std::mt19937 GameState::rng_(std::random_device{}());
+    // ИЗМЕНЕНО: Статическое определение ГСЧ удалено, так как он теперь является членом класса.
+    // === УДАЛЕНО: std::mt19937 GameState::rng_(std::random_device{}()); ===
 }
