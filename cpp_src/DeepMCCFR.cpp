@@ -29,7 +29,6 @@ std::vector<float> DeepMCCFR::featurize(const GameState& state) {
     const Board& my_board = state.get_player_board(player);
     const Board& opp_board = state.get_opponent_board(player);
     
-    // ИСПРАВЛЕНО: Точный размер вектора
     const int FEATURE_SIZE = 1486;
     std::vector<float> features(FEATURE_SIZE, 0.0f);
     int offset = 0;
@@ -44,7 +43,6 @@ std::vector<float> DeepMCCFR::featurize(const GameState& state) {
     }
     offset += 52;
 
-    // ИСПРАВЛЕНО: Корректная и более безопасная векторизация доски
     auto process_board = [&](const Board& board, int& current_offset) {
         for(int i=0; i<3; ++i) {
             Card c = board.top[i];
@@ -64,7 +62,9 @@ std::vector<float> DeepMCCFR::featurize(const GameState& state) {
     };
     
     process_board(my_board, offset);
+    // ИСПРАВЛЕНО: Удалено `offset += 13 * 53;`
     process_board(opp_board, offset);
+    // ИСПРАВЛЕНО: Удалено `offset += 13 * 53;`
 
     const auto& my_discards = state.get_my_discards(player);
     for (Card c : my_discards) {
