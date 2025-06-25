@@ -8,16 +8,16 @@ import time
 import numpy as np
 from model import DuelingNetwork
 from replay_buffer import ReplayBuffer
-from ofc_engine import DeepMCCFR # Наш C++ модуль
+from ofc_engine import DeepMCCFR
 
 # --- Гиперпараметры ---
-INPUT_SIZE = 1540 # 1+1+1+52 + 13*53 + 13*53 + 52 + 1 = 1540
-ACTION_LIMIT = 200 # Максимальное количество действий (должно совпадать с C++)
+INPUT_SIZE = 1540
+ACTION_LIMIT = 200
 LEARNING_RATE = 0.001
 REPLAY_BUFFER_SIZE = 500000
 BATCH_SIZE = 256
-TRAINING_INTERVAL = 100 # Обучаться каждые 100 сгенерированных партий
-SAVE_INTERVAL = 1000 # Сохранять модель каждые 1000 партий
+TRAINING_BLOCK_SIZE = 100 # Количество траверсов перед обучением и отчетом
+SAVE_INTERVAL_BLOCKS = 10 # Сохранять модель каждые N блоков (10 * 100 = 1000 траверсов)
 MODEL_PATH = "d2cfr_model.pth"
 
 def main():
@@ -43,60 +43,74 @@ def main():
     solver = DeepMCCFR(predict_regrets)
     print("Solver initialized. Starting training loop...")
 
-    total_iterations = 0
+    total_traversals = 0
+    block_counter = 0
     try:
         while True:
+            block_counter += 1
             start_time = time.time()
             
-            # Запускаем N траверсов в C++ для сбора данных
-            # Можно распараллелить, если C++ код потокобезопасен
-            num_traversals_per_block = 10
-            for _ in range(num_traversals_per_block):
+            # --- Сбор данных ---
+            # В этом цикле C++ движок работает и собирает данные
+            for _ in range(TRAINING_BLOCK_SIZE):
                 training_samples = solver.run_traversal()
                 for sample in training_samples:
                     replay_buffer.push(sample.infoset_vector, sample.target_regrets, sample.num_actions)
             
-            total_iterations += num_traversals_per_block
+            total_traversals += TRAINING_BLOCK_SIZE
             
-            # Обучение
-            if len(replay_buffer) >= BATCH_SIZE:
-                model.train()
-                
-                infosets, targets, num_actions_list = replay_buffer.sample(BATCH_SIZE)
-                infosets = infosets.to(device)
-                targets = targets.to(device)
+            # --- Обучение ---
+            if len(replay_buffer) < BATCH_SIZE:
+                print(f"Block {block_counter} | Total Traversals: {total_traversals} | Buffer size {len(replay_buffer)} is too small, skipping training.")
+                continue
 
-                optimizer.zero_grad()
-                
-                # Получаем предсказания для всех элементов батча
-                predictions = model(infosets, ACTION_LIMIT) # Предсказываем для максимального размера
-                
-                # Создаем маску, чтобы считать лосс только для релевантных действий
-                mask = torch.zeros_like(predictions)
-                for i, n_actions in enumerate(num_actions_list):
-                    mask[i, :n_actions] = 1.0
-                
-                # Применяем маску к предсказаниям и целям
-                predictions_masked = predictions * mask
-                targets_masked = targets * mask
+            model.train()
+            
+            infosets, targets, num_actions_list = replay_buffer.sample(BATCH_SIZE)
+            infosets = infosets.to(device)
+            targets = targets.to(device)
 
-                loss = criterion(predictions_masked, targets_masked)
-                loss.backward()
-                optimizer.step()
-                
-                duration = time.time() - start_time
-                print(f"Iter: {total_iterations}, Loss: {loss.item():.6f}, Buffer: {len(replay_buffer)}, Time: {duration:.2f}s")
+            optimizer.zero_grad()
+            
+            predictions = model(infosets, ACTION_LIMIT)
+            
+            mask = torch.zeros_like(predictions)
+            for i, n_actions in enumerate(num_actions_list):
+                mask[i, :n_actions] = 1.0
+            
+            predictions_masked = predictions * mask
+            targets_masked = targets * mask
 
-            # Сохранение
-            if total_iterations % SAVE_INTERVAL < num_traversals_per_block:
-                print(f"Saving model at iteration {total_iterations}...")
+            loss = criterion(predictions_masked, targets_masked)
+            loss.backward()
+            optimizer.step()
+            
+            duration = time.time() - start_time
+            traversals_per_sec = TRAINING_BLOCK_SIZE / duration if duration > 0 else float('inf')
+            
+            print(f"Block {block_counter} | Total: {total_traversals} | Loss: {loss.item():.6f} | Speed: {traversals_per_sec:.2f} trav/s")
+
+            # --- Сохранение и коммит в Git ---
+            if block_counter % SAVE_INTERVAL_BLOCKS == 0:
+                print("-" * 50)
+                print(f"Saving model at traversal {total_traversals}...")
                 torch.save(model.state_dict(), MODEL_PATH)
-                # Здесь можно добавить логику коммита в Git
+                
+                print("Pushing progress to GitHub...")
+                os.system(f'git add {MODEL_PATH}')
+                os.system(f'git commit -m "Training checkpoint after {total_traversals} traversals"')
+                os.system('git push')
+                print("Progress pushed successfully.")
+                print("-" * 50)
 
     except KeyboardInterrupt:
         print("\nTraining interrupted. Saving final model...")
         torch.save(model.state_dict(), MODEL_PATH)
-        print("Model saved. Exiting.")
+        print("Pushing final model to GitHub...")
+        os.system(f'git add {MODEL_PATH}')
+        os.system(f'git commit -m "Final training checkpoint after {total_traversals} traversals (manual stop)"')
+        os.system('git push')
+        print("Model saved and pushed. Exiting.")
 
 if __name__ == "__main__":
     main()
