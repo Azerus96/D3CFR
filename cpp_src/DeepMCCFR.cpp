@@ -1,4 +1,4 @@
-// mccfr_ofc-main/cpp_src/DeepMCCFR.cpp
+// D2CFR-main/cpp_src/DeepMCCFR.cpp
 
 #include "DeepMCCFR.hpp"
 #include <stdexcept>
@@ -18,7 +18,6 @@ std::vector<TrainingSample> DeepMCCFR::run_traversal() {
     std::vector<TrainingSample> samples;
     GameState initial_state;
     
-    // Мы делаем траверс для каждого игрока по очереди, чтобы собрать данные для обоих
     traverse(initial_state, 0, samples);
     traverse(initial_state, 1, samples);
     
@@ -30,8 +29,7 @@ std::vector<float> DeepMCCFR::featurize(const GameState& state) {
     const Board& my_board = state.get_player_board(player);
     const Board& opp_board = state.get_opponent_board(player);
     
-    // Размер вектора: 1 (улица) + 1 (дилер) + 1 (игрок) + 52 (рука) + 13*53 (своя доска) + 13*53 (доска оппонента) + 52 (свои сбросы) + 1 (кол-во сбросов оппонента)
-    const int FEATURE_SIZE = 1 + 1 + 1 + 52 + (13 * 53) + (13 * 53) + 52 + 1;
+    const int FEATURE_SIZE = 1540;
     std::vector<float> features(FEATURE_SIZE, 0.0f);
     int offset = 0;
 
@@ -39,41 +37,40 @@ std::vector<float> DeepMCCFR::featurize(const GameState& state) {
     features[offset++] = static_cast<float>(state.get_dealer_pos());
     features[offset++] = static_cast<float>(player);
 
-    // Карты в руке (one-hot)
     const auto& dealt_cards = state.get_dealt_cards();
     for (Card c : dealt_cards) {
         if (c != INVALID_CARD) features[offset + c] = 1.0f;
     }
     offset += 52;
 
-    // Своя доска (one-hot, 53 состояния: 52 карты + 1 "пусто")
-    auto process_board = [&](const Board& board, int& current_offset) {
-        for (Card c : board.top)    features[current_offset + (c == INVALID_CARD ? 52 : c)] = 1.0f; current_offset += 53;
-        for (Card c : board.top)    features[current_offset + (c == INVALID_CARD ? 52 : c)] = 1.0f; current_offset += 53;
-        for (Card c : board.top)    features[current_offset + (c == INVALID_CARD ? 52 : c)] = 1.0f; current_offset += 53;
-        for (Card c : board.middle) features[current_offset + (c == INVALID_CARD ? 52 : c)] = 1.0f; current_offset += 53;
-        for (Card c : board.middle) features[current_offset + (c == INVALID_CARD ? 52 : c)] = 1.0f; current_offset += 53;
-        for (Card c : board.middle) features[current_offset + (c == INVALID_CARD ? 52 : c)] = 1.0f; current_offset += 53;
-        for (Card c : board.middle) features[current_offset + (c == INVALID_CARD ? 52 : c)] = 1.0f; current_offset += 53;
-        for (Card c : board.middle) features[current_offset + (c == INVALID_CARD ? 52 : c)] = 1.0f; current_offset += 53;
-        for (Card c : board.bottom) features[current_offset + (c == INVALID_CARD ? 52 : c)] = 1.0f; current_offset += 53;
-        for (Card c : board.bottom) features[current_offset + (c == INVALID_CARD ? 52 : c)] = 1.0f; current_offset += 53;
-        for (Card c : board.bottom) features[current_offset + (c == INVALID_CARD ? 52 : c)] = 1.0f; current_offset += 53;
-        for (Card c : board.bottom) features[current_offset + (c == INVALID_CARD ? 52 : c)] = 1.0f; current_offset += 53;
-        for (Card c : board.bottom) features[current_offset + (c == INVALID_CARD ? 52 : c)] = 1.0f; current_offset += 53;
+    auto process_board = [&](const Board& board, int base_offset) {
+        for(int i=0; i<3; ++i) {
+            Card c = board.top[i];
+            features[base_offset + i*53 + (c == INVALID_CARD ? 52 : c)] = 1.0f;
+        }
+        base_offset += 3 * 53;
+        for(int i=0; i<5; ++i) {
+            Card c = board.middle[i];
+            features[base_offset + i*53 + (c == INVALID_CARD ? 52 : c)] = 1.0f;
+        }
+        base_offset += 5 * 53;
+        for(int i=0; i<5; ++i) {
+            Card c = board.bottom[i];
+            features[base_offset + i*53 + (c == INVALID_CARD ? 52 : c)] = 1.0f;
+        }
     };
     
     process_board(my_board, offset);
+    offset += 13 * 53;
     process_board(opp_board, offset);
+    offset += 13 * 53;
 
-    // Свои сбросы (one-hot)
     const auto& my_discards = state.get_my_discards(player);
     for (Card c : my_discards) {
         if (c != INVALID_CARD) features[offset + c] = 1.0f;
     }
     offset += 52;
 
-    // Количество сбросов оппонента
     features[offset++] = static_cast<float>(state.get_opponent_discards(player).size());
 
     return features;
@@ -95,7 +92,7 @@ std::map<int, float> DeepMCCFR::traverse(GameState state, int traversing_player,
     }
     
     int num_actions = legal_actions.size();
-    if (num_actions == 0) { // Если нет действий, идем дальше
+    if (num_actions == 0) {
         return traverse(state.apply_action({{}, INVALID_CARD}), traversing_player, samples);
     }
 
