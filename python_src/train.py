@@ -11,7 +11,7 @@ from replay_buffer import ReplayBuffer
 from ofc_engine import DeepMCCFR
 
 # --- Гиперпараметры ---
-INPUT_SIZE = 1486 # ИСПРАВЛЕНО: Точный размер вектора признаков
+INPUT_SIZE = 1486 
 ACTION_LIMIT = 200
 LEARNING_RATE = 0.001
 REPLAY_BUFFER_SIZE = 500000
@@ -77,16 +77,18 @@ def main():
             
             predictions = model(infosets, ACTION_LIMIT)
             
-            mask = torch.zeros_like(predictions)
-            for i, n_actions in enumerate(num_actions_list):
-                mask[i, :n_actions] = 1.0
+            # ИЗМЕНЕНО: Создание маски для обнуления предсказаний по нелегальным действиям.
+            # Этот векторизованный код заменяет медленный цикл for и выполняется значительно быстрее.
+            num_actions_tensor = torch.tensor(num_actions_list, device=device, dtype=torch.int64).unsqueeze(1)
+            indices = torch.arange(ACTION_LIMIT, device=device).unsqueeze(0)
+            mask = (indices < num_actions_tensor).float()
             
             predictions_masked = predictions * mask
             targets_masked = targets * mask
 
             loss = criterion(predictions_masked, targets_masked)
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # Добавим клиппинг градиента для стабильности
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             
             duration = time.time() - start_time
@@ -94,7 +96,7 @@ def main():
             
             print(f"Block {block_counter} | Total: {total_traversals:,} | Loss: {loss.item():.6f} | Speed: {traversals_per_sec:.2f} trav/s")
 
-            # --- Сохранение и коммит в Git ---
+            # Логика сохранения модели и отправки в Git, необходимая для Colab.
             if block_counter % SAVE_INTERVAL_BLOCKS == 0:
                 print("-" * 50)
                 print(f"Saving model at traversal {total_traversals:,}...")
@@ -110,6 +112,7 @@ def main():
     except KeyboardInterrupt:
         print("\nTraining interrupted. Saving final model...")
         torch.save(model.state_dict(), MODEL_PATH)
+        # Логика сохранения финальной модели в Git при остановке.
         print("Pushing final model to GitHub...")
         os.system(f'git add {MODEL_PATH}')
         os.system(f'git commit -m "Final training checkpoint after {total_traversals} traversals (manual stop)"')
