@@ -1,4 +1,4 @@
-// mccfr_ofc-main/cpp_src/game_state.hpp
+// D2CFR-main/cpp_src/game_state.hpp
 
 #pragma once
 #include "board.hpp"
@@ -25,7 +25,6 @@ namespace ofc {
                 std::uniform_int_distribution<int> dist(0, num_players - 1);
                 dealer_pos_ = dist(rng_);
             } else {
-                // ИСПРАВЛЕНО: Устранена ошибка самоприсваивания.
                 this->dealer_pos_ = dealer_pos;
             }
             current_player_ = (dealer_pos_ + 1) % num_players_;
@@ -56,7 +55,6 @@ namespace ofc {
             if (p2_foul) return {(float)(SCOOP_BONUS + p1_royalty), -(float)(SCOOP_BONUS + p1_royalty)};
 
             int line_score = 0;
-            // УЛУЧШЕНО: Используем новый API для get_row_cards, чтобы избежать лишних аллокаций
             CardSet p1_top, p1_mid, p1_bot, p2_top, p2_mid, p2_bot;
             p1_board.get_row_cards("top", p1_top);
             p1_board.get_row_cards("middle", p1_mid);
@@ -73,6 +71,9 @@ namespace ofc {
             
             float p1_total = (float)(line_score + p1_royalty - p2_royalty);
 
+            // Эта логика бонусов за фантазию больше не нужна, так как мы встроили ее в роялти
+            // Но оставляем ее закомментированной на случай, если захотим вернуть
+            /*
             if (p1_board.qualifies_for_fantasyland(evaluator)) {
                 int fc = p1_board.get_fantasyland_card_count(evaluator);
                 if (fc == 14) p1_total += FANTASY_BONUS_QQ; else if (fc == 15) p1_total += FANTASY_BONUS_KK;
@@ -83,6 +84,7 @@ namespace ofc {
                 if (fc == 14) p1_total -= FANTASY_BONUS_QQ; else if (fc == 15) p1_total -= FANTASY_BONUS_KK;
                 else if (fc == 16) p1_total -= FANTASY_BONUS_AA; else if (fc == 17) p1_total -= FANTASY_BONUS_TRIPS;
             }
+            */
             return {p1_total, -p1_total};
         }
 
@@ -95,9 +97,8 @@ namespace ofc {
 
             if (street_ == 1) {
                 cards_to_place = dealt_cards_;
+                generate_all_placements(cards_to_place, discarded, actions);
             } else {
-                // На улицах 2-5 мы должны выбрать 2 из 3 карт.
-                // Генерируем все 3 комбинации.
                 for (int i = 0; i < 3; ++i) {
                     CardSet current_placement_cards;
                     Card current_discarded = dealt_cards_[i];
@@ -106,10 +107,8 @@ namespace ofc {
                     }
                     generate_all_placements(current_placement_cards, current_discarded, actions);
                 }
-                return actions;
             }
             
-            generate_all_placements(cards_to_place, discarded, actions);
             return actions;
         }
 
@@ -143,6 +142,19 @@ namespace ofc {
         const Board& get_player_board(int player_idx) const { return boards_[player_idx]; }
         const Board& get_opponent_board(int player_idx) const { return boards_[(player_idx + 1) % num_players_]; }
 
+        // --- НОВЫЕ МЕТОДЫ ДЛЯ НЕЙРОСЕТИ ---
+        const CardSet& get_my_discards(int player_idx) const {
+            return discards_[player_idx];
+        }
+        const CardSet& get_opponent_discards(int player_idx) const {
+            return discards_[(player_idx + 1) % num_players_];
+        }
+        int get_dealer_pos() const { return dealer_pos_; }
+
+        // Статический метод для доступа к ГСЧ извне (например, для сэмплирования действий)
+        static std::mt19937& get_rng() { return rng_; }
+        // ------------------------------------
+
     private:
         inline void deal_cards() {
             int num_to_deal = (street_ == 1) ? 5 : 3;
@@ -153,11 +165,6 @@ namespace ofc {
             deck_.resize(deck_.size() - num_to_deal);
         }
 
-        // УЛУЧШЕНО: Полностью убрано ограничение на количество действий (ACTION_LIMIT).
-        // Это делает алгоритм теоретически корректным, но может быть ОЧЕНЬ медленным
-        // из-за огромного количества комбинаций в "Ананасе".
-        // Для практического применения может потребоваться более умный метод
-        // отсечения или выборки действий (Action Sampling / Pruning).
         inline void generate_all_placements(const CardSet& cards, Card discarded, std::vector<Action>& actions) const {
             const Board& board = boards_[current_player_];
             std::vector<std::pair<std::string, int>> available_slots;
@@ -178,7 +185,6 @@ namespace ofc {
             std::function<void(int, int)> combinations = 
                 [&](int offset, int k) {
                 if (k == 0) {
-                    // После выбора слотов, генерируем все перестановки карт по этим слотам
                     do {
                         std::vector<Placement> current_placement;
                         for(size_t i = 0; i < cards.size(); ++i) {
@@ -186,7 +192,6 @@ namespace ofc {
                         }
                         actions.push_back({current_placement, discarded});
                     } while(std::next_permutation(card_indices.begin(), card_indices.end()));
-                    // Восстанавливаем исходный порядок индексов карт для следующей комбинации слотов
                     std::iota(card_indices.begin(), card_indices.end(), 0);
                     return;
                 }
@@ -208,6 +213,7 @@ namespace ofc {
         CardSet deck_;
         CardSet dealt_cards_;
         
-        static std::mt19937 rng_;
+        // ИЗМЕНЕНО: rng_ теперь mutable, чтобы его можно было использовать в const методах
+        mutable static std::mt19937 rng_;
     };
 }
