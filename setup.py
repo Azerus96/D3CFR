@@ -1,0 +1,45 @@
+# mccfr_ofc-main/setup.py
+
+from setuptools import setup, Extension
+import pybind11
+import glob
+import os
+
+# Определяем аргументы компилятора
+cpp_args = ['-std=c++17', '-O3', '-fopenmp']
+
+# Для macOS может потребоваться другой флаг OpenMP
+if os.uname().sysname == 'Darwin':
+    cpp_args = ['-std=c++17', '-O3', '-Xpreprocessor', '-fopenmp']
+
+
+# Находим все C++ исходники
+ompeval_sources = glob.glob("cpp_src/ompeval/omp/*.cpp")
+ofc_sources = [
+    "cpp_src/game_state.cpp",
+    "cpp_src/DeepMCCFR.cpp" # Добавим этот файл на следующем шаге
+]
+
+ext_modules = [
+    Extension(
+        'ofc_engine', # Имя модуля, которое будем импортировать в Python
+        ['pybind_wrapper.cpp'] + ompeval_sources + ofc_sources,
+        include_dirs=[
+            pybind11.get_include(),
+            "cpp_src",
+            "cpp_src/ompeval"
+        ],
+        language='c++',
+        extra_compile_args=cpp_args,
+        extra_link_args=['-fopenmp']
+    ),
+]
+
+setup(
+    name="ofc_engine",
+    version="2.0.0",
+    author="AI Solver & You",
+    description="Deep MCCFR solver for Pineapple OFC poker.",
+    ext_modules=ext_modules,
+    zip_safe=False,
+)
