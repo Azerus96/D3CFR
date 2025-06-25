@@ -14,15 +14,18 @@ namespace ofc {
 
     class GameState {
     public:
+        // ИЗМЕНЕНО: Добавлена инициализация члена rng_ в списке инициализации конструктора.
         GameState(int num_players = 2, int dealer_pos = -1)
-            : num_players_(num_players), street_(1), boards_(num_players), discards_(num_players) {
+            : rng_(std::random_device{}()), num_players_(num_players), street_(1), boards_(num_players), discards_(num_players) {
             
             deck_.resize(52);
             std::iota(deck_.begin(), deck_.end(), 0);
+            // ИЗМЕНЕНО: Используем член класса rng_ вместо статического.
             std::shuffle(deck_.begin(), deck_.end(), rng_);
 
             if (dealer_pos == -1) {
                 std::uniform_int_distribution<int> dist(0, num_players - 1);
+                // ИЗМЕНЕНО: Используем член класса rng_ вместо статического.
                 dealer_pos_ = dist(rng_);
             } else {
                 this->dealer_pos_ = dealer_pos;
@@ -71,20 +74,6 @@ namespace ofc {
             
             float p1_total = (float)(line_score + p1_royalty - p2_royalty);
 
-            // Эта логика бонусов за фантазию больше не нужна, так как мы встроили ее в роялти
-            // Но оставляем ее закомментированной на случай, если захотим вернуть
-            /*
-            if (p1_board.qualifies_for_fantasyland(evaluator)) {
-                int fc = p1_board.get_fantasyland_card_count(evaluator);
-                if (fc == 14) p1_total += FANTASY_BONUS_QQ; else if (fc == 15) p1_total += FANTASY_BONUS_KK;
-                else if (fc == 16) p1_total += FANTASY_BONUS_AA; else if (fc == 17) p1_total += FANTASY_BONUS_TRIPS;
-            }
-            if (p2_board.qualifies_for_fantasyland(evaluator)) {
-                int fc = p2_board.get_fantasyland_card_count(evaluator);
-                if (fc == 14) p1_total -= FANTASY_BONUS_QQ; else if (fc == 15) p1_total -= FANTASY_BONUS_KK;
-                else if (fc == 16) p1_total -= FANTASY_BONUS_AA; else if (fc == 17) p1_total -= FANTASY_BONUS_TRIPS;
-            }
-            */
             return {p1_total, -p1_total};
         }
 
@@ -142,7 +131,6 @@ namespace ofc {
         const Board& get_player_board(int player_idx) const { return boards_[player_idx]; }
         const Board& get_opponent_board(int player_idx) const { return boards_[(player_idx + 1) % num_players_]; }
 
-        // --- НОВЫЕ МЕТОДЫ ДЛЯ НЕЙРОСЕТИ ---
         const CardSet& get_my_discards(int player_idx) const {
             return discards_[player_idx];
         }
@@ -151,9 +139,8 @@ namespace ofc {
         }
         int get_dealer_pos() const { return dealer_pos_; }
 
-        // Статический метод для доступа к ГСЧ извне (например, для сэмплирования действий)
-        static std::mt19937& get_rng() { return rng_; }
-        // ------------------------------------
+        // ИЗМЕНЕНО: Метод больше не статический, он возвращает ссылку на ГСЧ конкретного объекта.
+        std::mt19937& get_rng() { return rng_; }
 
     private:
         inline void deal_cards() {
@@ -213,7 +200,8 @@ namespace ofc {
         CardSet deck_;
         CardSet dealt_cards_;
         
-        // ИЗМЕНЕНО: rng_ теперь mutable, чтобы его можно было использовать в const методах
-        mutable static std::mt19937 rng_;
+        // ИЗМЕНЕНО: ГСЧ теперь является обычным (mutable) членом класса, а не статическим.
+        // Это обеспечивает потокобезопасность, так как у каждого потока будет свой независимый GameState.
+        mutable std::mt19937 rng_;
     };
 }
