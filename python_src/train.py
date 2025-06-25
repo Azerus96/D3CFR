@@ -1,4 +1,4 @@
-# mccfr_ofc-main/python_src/train.py
+# D2CFR-main/python_src/train.py
 
 import torch
 import torch.nn as nn
@@ -11,13 +11,13 @@ from replay_buffer import ReplayBuffer
 from ofc_engine import DeepMCCFR
 
 # --- Гиперпараметры ---
-INPUT_SIZE = 1540
+INPUT_SIZE = 1486 # ИСПРАВЛЕНО: Точный размер вектора признаков
 ACTION_LIMIT = 200
 LEARNING_RATE = 0.001
 REPLAY_BUFFER_SIZE = 500000
 BATCH_SIZE = 256
-TRAINING_BLOCK_SIZE = 100 # Количество траверсов перед обучением и отчетом
-SAVE_INTERVAL_BLOCKS = 10 # Сохранять модель каждые N блоков (10 * 100 = 1000 траверсов)
+TRAINING_BLOCK_SIZE = 100 
+SAVE_INTERVAL_BLOCKS = 10 
 MODEL_PATH = "d2cfr_model.pth"
 
 def main():
@@ -31,7 +31,11 @@ def main():
 
     if os.path.exists(MODEL_PATH):
         print(f"Loading existing model from {MODEL_PATH}")
-        model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
+        try:
+            model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
+            print("Model loaded successfully.")
+        except Exception as e:
+            print(f"Could not load model: {e}. Starting from scratch.")
 
     def predict_regrets(infoset_vector, num_actions):
         model.eval()
@@ -51,7 +55,6 @@ def main():
             start_time = time.time()
             
             # --- Сбор данных ---
-            # В этом цикле C++ движок работает и собирает данные
             for _ in range(TRAINING_BLOCK_SIZE):
                 training_samples = solver.run_traversal()
                 for sample in training_samples:
@@ -83,17 +86,18 @@ def main():
 
             loss = criterion(predictions_masked, targets_masked)
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0) # Добавим клиппинг градиента для стабильности
             optimizer.step()
             
             duration = time.time() - start_time
             traversals_per_sec = TRAINING_BLOCK_SIZE / duration if duration > 0 else float('inf')
             
-            print(f"Block {block_counter} | Total: {total_traversals} | Loss: {loss.item():.6f} | Speed: {traversals_per_sec:.2f} trav/s")
+            print(f"Block {block_counter} | Total: {total_traversals:,} | Loss: {loss.item():.6f} | Speed: {traversals_per_sec:.2f} trav/s")
 
             # --- Сохранение и коммит в Git ---
             if block_counter % SAVE_INTERVAL_BLOCKS == 0:
                 print("-" * 50)
-                print(f"Saving model at traversal {total_traversals}...")
+                print(f"Saving model at traversal {total_traversals:,}...")
                 torch.save(model.state_dict(), MODEL_PATH)
                 
                 print("Pushing progress to GitHub...")
