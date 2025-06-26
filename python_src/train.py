@@ -16,16 +16,16 @@ from ofc_engine import DeepMCCFR
 INPUT_SIZE = 1486 
 ACTION_LIMIT = 200
 LEARNING_RATE = 0.001
-REPLAY_BUFFER_SIZE = 500000
+REPLAY_BUFFER_SIZE = 200000
 BATCH_SIZE = 256
-TRAINING_BLOCK_SIZE = 100 # Теперь это количество параллельных задач, а не последовательных итераций
-SAVE_INTERVAL_BLOCKS = 10 
+TRAINING_BLOCK_SIZE = 40 # Теперь это количество параллельных задач, а не последовательных итераций
+SAVE_INTERVAL_BLOCKS = 50 
 MODEL_PATH = "d2cfr_model.pth"
 
 # ИЗМЕНЕНО: Добавляем параметр для количества рабочих потоков.
 # Для вашей 96-ядерной машины установите это значение в 96.
 # os.cpu_count() определит количество ядер автоматически для других машин.
-NUM_WORKERS = 96 # Ставим 4 как запасной вариант, если os.cpu_count() вернет None
+NUM_WORKERS = 2 # Ставим 4 как запасной вариант, если os.cpu_count() вернет None
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
