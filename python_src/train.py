@@ -1,6 +1,7 @@
 import os
 import time
 import torch
+import torch.nn as nn
 import torch.optim as optim
 from torch.nn.utils import clip_grad_norm_
 import numpy as np
