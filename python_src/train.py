@@ -6,8 +6,8 @@ import torch.optim as optim
 import os
 import time
 import numpy as np
-from model import DuelingNetwork
-from replay_buffer import ReplayBuffer
+from .model import DuelingNetwork
+from .replay_buffer import ReplayBuffer
 from ofc_engine import DeepMCCFR
 
 # --- Гиперпараметры ---
