@@ -149,11 +149,23 @@ def main():
                 
                 print(f"Block {block_counter} | Total: {total_traversals:,} | Loss: {loss.item():.6f} | Speed: {traversals_per_sec:.2f} trav/s")
 
+                # Внутри функции main() в файле train.py
+
+            # Логика сохранения модели
                 if block_counter % SAVE_INTERVAL_BLOCKS == 0:
-                    print("-" * 50)
+                    print("-" * 100)
                     print(f"Saving model at traversal {total_traversals:,}...")
                     torch.save(model.state_dict(), MODEL_PATH)
-                    print("-" * 50)
+                
+                # --- НАЧАЛО РАСКОММЕНТИРОВАННОГО БЛОКА ---
+                    print("Pushing progress to GitHub...")
+                    os.system(f'git add {MODEL_PATH}')
+                    os.system(f'git commit -m "Training checkpoint after {total_traversals} traversals"')
+                    os.system('git push')
+                    print("Progress pushed successfully.")
+                # --- КОНЕЦ РАСКОММЕНТИРОВАННОГО БЛОКА ---
+                
+                    print("-" * 100)
 
     except KeyboardInterrupt:
         print("\nTraining interrupted. Saving final model...")
