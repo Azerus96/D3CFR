@@ -1,3 +1,5 @@
+// D2CFR-main/pybind_wrapper.cpp
+
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/functional.h>
@@ -29,7 +31,9 @@ PYBIND11_MODULE(ofc_engine, m) {
     // Биндинг для менеджера запросов
     py::class_<ofc::RequestManager, std::shared_ptr<ofc::RequestManager>>(m, "RequestManager")
         .def(py::init<>())
-        .def("get_requests", &ofc::RequestManager::get_requests, py::arg("max_batch_size"))
+        // ИСПРАВЛЕНО: Добавлен call_guard для освобождения GIL во время ожидания.
+        // Это предотвращает deadlock.
+        .def("get_requests", &ofc::RequestManager::get_requests, py::arg("max_batch_size"), py::call_guard<py::gil_scoped_release>())
         .def("post_results", &ofc::RequestManager::post_results);
 
     // Биндинг для солвера, который теперь принимает указатель на менеджер
