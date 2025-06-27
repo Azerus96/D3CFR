@@ -21,7 +21,7 @@ LEARNING_RATE = 0.001
 REPLAY_BUFFER_SIZE = 2000000
 BATCH_SIZE = 2048
 TRAINING_BLOCK_SIZE = 24
-SAVE_INTERVAL_BLOCKS = 100 
+SAVE_INTERVAL_BLOCKS = 5 
 MODEL_PATH = "d2cfr_model.pth"
 NUM_WORKERS = 24
 # Размер батча для обработки запросов от C++. Должен быть достаточно большим.
