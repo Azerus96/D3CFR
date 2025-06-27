@@ -1,5 +1,3 @@
-// mccfr_ofc-main/cpp_src/DeepMCCFR.hpp
-
 #pragma once
 #include "game_state.hpp"
 #include "hand_evaluator.hpp"
@@ -12,8 +10,6 @@ namespace py = pybind11;
 
 namespace ofc {
 
-// Структура для хранения одного тренировочного примера.
-// Pybind11 автоматически преобразует ее в Python-объект.
 struct TrainingSample {
     std::vector<float> infoset_vector;
     std::vector<float> target_regrets;
@@ -22,20 +18,15 @@ struct TrainingSample {
 
 class DeepMCCFR {
 public:
-    // Конструктор принимает Python-функцию (нейросеть) как колбэк
-    DeepMCCFR(py::function predict_callback);
-
-    // Главный метод: запускает одну итерацию и возвращает данные для обучения
+    DeepMCCFR(py::function predict_callback, size_t action_limit);
     std::vector<TrainingSample> run_traversal();
 
 private:
     HandEvaluator evaluator_;
     py::function predict_callback_;
+    size_t action_limit_;
 
-    // Рекурсивная функция траверса
     std::map<int, float> traverse(GameState state, int traversing_player, std::vector<TrainingSample>& samples);
-    
-    // Функция для преобразования GameState в вектор для нейросети
     std::vector<float> featurize(const GameState& state);
 };
 
