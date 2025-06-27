@@ -15,14 +15,14 @@ from ofc_engine import DeepMCCFR
 # --- ГИПЕРПАРАМЕТРЫ ---
 INPUT_SIZE = 1486 
 # ЕДИНСТВЕННЫЙ ИСТОЧНИК ПРАВДЫ: Максимальное количество действий, которое мы рассматриваем.
-ACTION_LIMIT = 200 
+ACTION_LIMIT = 10 
 LEARNING_RATE = 0.001
-REPLAY_BUFFER_SIZE = 2000000
-BATCH_SIZE = 2048
-TRAINING_BLOCK_SIZE = 88
+REPLAY_BUFFER_SIZE = 1000
+BATCH_SIZE = 256
+TRAINING_BLOCK_SIZE = 1
 SAVE_INTERVAL_BLOCKS = 50 
 MODEL_PATH = "d2cfr_model.pth"
-NUM_WORKERS = 88
+NUM_WORKERS = 1
 
 def main():
     # Принудительно используем 1 поток для PyTorch, чтобы избежать конфликтов
