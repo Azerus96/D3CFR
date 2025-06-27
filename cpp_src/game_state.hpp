@@ -1,5 +1,3 @@
-// D2CFR-main/cpp_src/game_state.hpp
-
 #pragma once
 #include "board.hpp"
 #include <vector>
@@ -9,23 +7,22 @@
 #include <iostream>
 #include <functional>
 #include <map>
+#include <string>
+#include <unordered_set>
 
 namespace ofc {
 
     class GameState {
     public:
-        // ИЗМЕНЕНО: Добавлена инициализация члена rng_ в списке инициализации конструктора.
         GameState(int num_players = 2, int dealer_pos = -1)
             : rng_(std::random_device{}()), num_players_(num_players), street_(1), boards_(num_players), discards_(num_players) {
             
             deck_.resize(52);
             std::iota(deck_.begin(), deck_.end(), 0);
-            // ИЗМЕНЕНО: Используем член класса rng_ вместо статического.
             std::shuffle(deck_.begin(), deck_.end(), rng_);
 
             if (dealer_pos == -1) {
                 std::uniform_int_distribution<int> dist(0, num_players - 1);
-                // ИЗМЕНЕНО: Используем член класса rng_ вместо статического.
                 dealer_pos_ = dist(rng_);
             } else {
                 this->dealer_pos_ = dealer_pos;
@@ -41,15 +38,11 @@ namespace ofc {
         }
 
         inline std::pair<float, float> get_payoffs(const HandEvaluator& evaluator) const {
-            const int FANTASY_BONUS_QQ = 15, FANTASY_BONUS_KK = 20, FANTASY_BONUS_AA = 25, FANTASY_BONUS_TRIPS = 30;
             const int SCOOP_BONUS = 3;
-
             const Board& p1_board = boards_[0];
             const Board& p2_board = boards_[1];
-
             bool p1_foul = p1_board.is_foul(evaluator);
             bool p2_foul = p2_board.is_foul(evaluator);
-
             int p1_royalty = p1_foul ? 0 : p1_board.get_total_royalty(evaluator);
             int p2_royalty = p2_foul ? 0 : p2_board.get_total_royalty(evaluator);
 
@@ -71,31 +64,34 @@ namespace ofc {
             if (evaluator.evaluate(p1_bot) < evaluator.evaluate(p2_bot)) line_score++; else line_score--;
 
             if (abs(line_score) == 3) line_score = (line_score > 0) ? SCOOP_BONUS : -SCOOP_BONUS;
-            
             float p1_total = (float)(line_score + p1_royalty - p2_royalty);
-
             return {p1_total, -p1_total};
         }
 
-        inline std::vector<Action> get_legal_actions() const {
+        inline std::vector<Action> get_legal_actions(size_t action_limit) const {
             std::vector<Action> actions;
             if (is_terminal()) return actions;
 
             CardSet cards_to_place;
-            Card discarded = INVALID_CARD;
-
             if (street_ == 1) {
                 cards_to_place = dealt_cards_;
-                generate_all_placements(cards_to_place, discarded, actions);
+                generate_random_placements(cards_to_place, INVALID_CARD, actions, action_limit);
             } else {
+                size_t limit_per_discard = action_limit / 3 + 1;
                 for (int i = 0; i < 3; ++i) {
                     CardSet current_placement_cards;
                     Card current_discarded = dealt_cards_[i];
                     for (int j = 0; j < 3; ++j) {
                         if (i != j) current_placement_cards.push_back(dealt_cards_[j]);
                     }
-                    generate_all_placements(current_placement_cards, current_discarded, actions);
+                    generate_random_placements(current_placement_cards, current_discarded, actions, limit_per_discard);
                 }
+            }
+            
+            // Перемешиваем и обрезаем до финального лимита на всякий случай
+            std::shuffle(actions.begin(), actions.end(), rng_);
+            if (actions.size() > action_limit) {
+                actions.resize(action_limit);
             }
             
             return actions;
@@ -130,16 +126,9 @@ namespace ofc {
         const CardSet& get_dealt_cards() const { return dealt_cards_; }
         const Board& get_player_board(int player_idx) const { return boards_[player_idx]; }
         const Board& get_opponent_board(int player_idx) const { return boards_[(player_idx + 1) % num_players_]; }
-
-        const CardSet& get_my_discards(int player_idx) const {
-            return discards_[player_idx];
-        }
-        const CardSet& get_opponent_discards(int player_idx) const {
-            return discards_[(player_idx + 1) % num_players_];
-        }
+        const CardSet& get_my_discards(int player_idx) const { return discards_[player_idx]; }
+        const CardSet& get_opponent_discards(int player_idx) const { return discards_[(player_idx + 1) % num_players_]; }
         int get_dealer_pos() const { return dealer_pos_; }
-
-        // ИЗМЕНЕНО: Метод больше не статический, он возвращает ссылку на ГСЧ конкретного объекта.
         std::mt19937& get_rng() { return rng_; }
 
     private:
@@ -152,7 +141,7 @@ namespace ofc {
             deck_.resize(deck_.size() - num_to_deal);
         }
 
-        inline void generate_all_placements(const CardSet& cards, Card discarded, std::vector<Action>& actions) const {
+        inline void generate_random_placements(const CardSet& cards, Card discarded, std::vector<Action>& actions, size_t limit) const {
             const Board& board = boards_[current_player_];
             std::vector<std::pair<std::string, int>> available_slots;
             for(int i=0; i<3; ++i) if(board.top[i] == INVALID_CARD) available_slots.push_back({"top", i});
@@ -161,34 +150,35 @@ namespace ofc {
 
             if (available_slots.size() < cards.size()) return;
 
-            std::vector<int> slot_indices(available_slots.size());
-            std::iota(slot_indices.begin(), slot_indices.end(), 0);
-
-            std::vector<int> card_indices(cards.size());
-            std::iota(card_indices.begin(), card_indices.end(), 0);
-
-            std::vector<int> current_slot_selection(cards.size());
+            std::unordered_set<std::string> seen_placements;
             
-            std::function<void(int, int)> combinations = 
-                [&](int offset, int k) {
-                if (k == 0) {
-                    do {
-                        std::vector<Placement> current_placement;
-                        for(size_t i = 0; i < cards.size(); ++i) {
-                            current_placement.push_back({cards[card_indices[i]], available_slots[current_slot_selection[i]]});
-                        }
-                        actions.push_back({current_placement, discarded});
-                    } while(std::next_permutation(card_indices.begin(), card_indices.end()));
-                    std::iota(card_indices.begin(), card_indices.end(), 0);
-                    return;
+            for (size_t i = 0; i < limit * 3 && actions.size() < limit; ++i) {
+                std::shuffle(available_slots.begin(), available_slots.end(), rng_);
+                
+                CardSet shuffled_cards = cards;
+                std::shuffle(shuffled_cards.begin(), shuffled_cards.end(), rng_);
+
+                std::vector<Placement> current_placement;
+                for(size_t j = 0; j < cards.size(); ++j) {
+                    current_placement.push_back({shuffled_cards[j], available_slots[j]});
                 }
-                for (size_t i = offset; i <= slot_indices.size() - k; ++i) {
-                    current_slot_selection[cards.size() - k] = slot_indices[i];
-                    combinations(i + 1, k - 1);
+                
+                std::sort(current_placement.begin(), current_placement.end(), 
+                    [](const Placement& a, const Placement& b){
+                        if (a.second.first != b.second.first) return a.second.first < b.second.first;
+                        return a.second.second < b.second.second;
+                });
+
+                std::string key;
+                for(const auto& p : current_placement) {
+                    key += std::to_string(p.first) + p.second.first + std::to_string(p.second.second);
                 }
-            };
-            
-            combinations(0, cards.size());
+
+                if (seen_placements.find(key) == seen_placements.end()) {
+                    seen_placements.insert(key);
+                    actions.push_back({current_placement, discarded});
+                }
+            }
         }
 
         int num_players_;
@@ -200,8 +190,6 @@ namespace ofc {
         CardSet deck_;
         CardSet dealt_cards_;
         
-        // ИЗМЕНЕНО: ГСЧ теперь является обычным (mutable) членом класса, а не статическим.
-        // Это обеспечивает потокобезопасность, так как у каждого потока будет свой независимый GameState.
         mutable std::mt19937 rng_;
     };
 }
