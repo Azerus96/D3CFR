@@ -14,7 +14,7 @@ from ofc_engine import DeepMCCFR
 
 # --- Гиперпараметры ---
 INPUT_SIZE = 1486 
-ACTION_LIMIT = 50
+ACTION_LIMIT = 10
 LEARNING_RATE = 0.001
 REPLAY_BUFFER_SIZE = 1000
 BATCH_SIZE = 256
