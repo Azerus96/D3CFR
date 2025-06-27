@@ -82,7 +82,7 @@ std::map<int, float> DeepMCCFR::traverse(GameState state, int traversing_player,
     int current_player = state.get_current_player();
     auto legal_actions = state.get_legal_actions();
     
-    const size_t ACTION_LIMIT = (state.get_street() == 1) ? 50 : 50;
+    const size_t ACTION_LIMIT = (state.get_street() == 1) ? 10 : 20;
     if (legal_actions.size() > ACTION_LIMIT) {
         // ИЗМЕНЕНО: Вызов get_rng() теперь осуществляется через объект state.
         std::shuffle(legal_actions.begin(), legal_actions.end(), state.get_rng());
