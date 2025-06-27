@@ -48,7 +48,11 @@ def inference_thread_func(request_manager, model, device):
         for i, req in enumerate(requests):
             # Отправляем только нужное количество "сожалений"
             regrets = pred_regrets_batch[i].cpu().tolist()[:req.num_actions]
-            results.append(PredictionResult(id=req.id, regrets=regrets))
+            # ИСПРАВЛЕНО: Создаем объект и заполняем поля по одному
+            res = PredictionResult()
+            res.id = req.id
+            res.regrets = regrets
+            results.append(res)
             
         # Отправляем результаты обратно в C++
         request_manager.post_results(results)
