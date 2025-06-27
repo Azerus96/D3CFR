@@ -6,7 +6,8 @@
 
 namespace ofc {
 
-DeepMCCFR::DeepMCCFR(py::function predict_callback) : predict_callback_(predict_callback) {
+DeepMCCFR::DeepMCCFR(py::function predict_callback, size_t action_limit) 
+    : predict_callback_(predict_callback), action_limit_(action_limit) {
     if (!predict_callback) {
         throw std::runtime_error("Predict callback function is null.");
     }
@@ -80,14 +81,8 @@ std::map<int, float> DeepMCCFR::traverse(GameState state, int traversing_player,
     }
 
     int current_player = state.get_current_player();
-    auto legal_actions = state.get_legal_actions();
     
-    const size_t ACTION_LIMIT = (state.get_street() == 1) ? 10 : 20;
-    if (legal_actions.size() > ACTION_LIMIT) {
-        // ИЗМЕНЕНО: Вызов get_rng() теперь осуществляется через объект state.
-        std::shuffle(legal_actions.begin(), legal_actions.end(), state.get_rng());
-        legal_actions.resize(ACTION_LIMIT);
-    }
+    auto legal_actions = state.get_legal_actions(action_limit_);
     
     int num_actions = legal_actions.size();
     if (num_actions == 0) {
@@ -95,7 +90,6 @@ std::map<int, float> DeepMCCFR::traverse(GameState state, int traversing_player,
     }
 
     if (current_player != traversing_player) {
-        // ИЗМЕНЕНО: Вызов get_rng() теперь осуществляется через объект state.
         int action_idx = state.get_rng()() % num_actions;
         return traverse(state.apply_action(legal_actions[action_idx]), traversing_player, samples);
     }
