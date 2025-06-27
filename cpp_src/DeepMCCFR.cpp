@@ -1,3 +1,5 @@
+// D2CFR-main/cpp_src/DeepMCCFR.cpp
+
 #include "DeepMCCFR.hpp"
 #include <stdexcept>
 #include <iostream>
@@ -71,7 +73,7 @@ std::vector<float> DeepMCCFR::featurize(const GameState& state) {
 
     features[offset++] = static_cast<float>(state.get_opponent_discards(player).size());
 
-    return features; // <--- ИСПРАВЛЕНО
+    return features;
 }
 
 std::map<int, float> DeepMCCFR::traverse(GameState state, int traversing_player, std::vector<TrainingSample>& samples) {
@@ -96,7 +98,10 @@ std::map<int, float> DeepMCCFR::traverse(GameState state, int traversing_player,
 
     std::vector<float> infoset_vec = featurize(state);
     
-    PredictionResult result = request_manager_->make_request(infoset_vec, num_actions);
+    // ИЗМЕНЕНО: Получаем "обещание" и ждем его исполнения
+    auto promise = request_manager_->make_request(infoset_vec, num_actions);
+    PredictionResult result = promise->get(); // Блокирующий вызов
+    
     std::vector<float> regrets = result.regrets;
 
     std::vector<float> strategy(num_actions);
