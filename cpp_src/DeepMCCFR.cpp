@@ -6,10 +6,10 @@
 
 namespace ofc {
 
-DeepMCCFR::DeepMCCFR(py::function predict_callback, size_t action_limit) 
-    : predict_callback_(predict_callback), action_limit_(action_limit) {
-    if (!predict_callback) {
-        throw std::runtime_error("Predict callback function is null.");
+DeepMCCFR::DeepMCCFR(std::shared_ptr<RequestManager> manager, size_t action_limit) 
+    : request_manager_(manager), action_limit_(action_limit) {
+    if (!request_manager_) {
+        throw std::runtime_error("RequestManager is null.");
     }
 }
 
@@ -71,7 +71,7 @@ std::vector<float> DeepMCCFR::featurize(const GameState& state) {
 
     features[offset++] = static_cast<float>(state.get_opponent_discards(player).size());
 
-    return features;
+    return features; // <--- ИСПРАВЛЕНО
 }
 
 std::map<int, float> DeepMCCFR::traverse(GameState state, int traversing_player, std::vector<TrainingSample>& samples) {
@@ -95,8 +95,9 @@ std::map<int, float> DeepMCCFR::traverse(GameState state, int traversing_player,
     }
 
     std::vector<float> infoset_vec = featurize(state);
-    py::list py_regrets = predict_callback_(infoset_vec, num_actions);
-    std::vector<float> regrets = py_regrets.cast<std::vector<float>>();
+    
+    PredictionResult result = request_manager_->make_request(infoset_vec, num_actions);
+    std::vector<float> regrets = result.regrets;
 
     std::vector<float> strategy(num_actions);
     float total_positive_regret = 0.0f;
