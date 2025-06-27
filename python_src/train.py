@@ -15,7 +15,7 @@ from ofc_engine import DeepMCCFR, RequestManager, PredictionResult
 
 # --- ГИПЕРПАРАМЕТРЫ ---
 INPUT_SIZE = 1486 
-ACTION_LIMIT = 10 
+ACTION_LIMIT = 1 
 LEARNING_RATE = 0.001
 REPLAY_BUFFER_SIZE = 2000000
 BATCH_SIZE = 2048
