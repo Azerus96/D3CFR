@@ -16,14 +16,14 @@ from ofc_engine import DeepMCCFR, RequestManager, PredictionResult
 # --- ГИПЕРПАРАМЕТРЫ ---
 INPUT_SIZE = 1486 
 # ИСПРАВЛЕНО: Увеличено значение для осмысленного обучения
-ACTION_LIMIT = 100 
+ACTION_LIMIT = 64 
 LEARNING_RATE = 0.001
 REPLAY_BUFFER_SIZE = 2000000
 BATCH_SIZE = 2048
-TRAINING_BLOCK_SIZE = 88
+TRAINING_BLOCK_SIZE = 64
 SAVE_INTERVAL_BLOCKS = 100 
 MODEL_PATH = "d2cfr_model.pth"
-NUM_WORKERS = 88
+NUM_WORKERS = 64
 # Размер батча для обработки запросов от C++. Должен быть достаточно большим.
 INFERENCE_BATCH_SIZE = 1024 
 
