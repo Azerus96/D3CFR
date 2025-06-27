@@ -14,12 +14,18 @@ namespace ofc {
 
     class GameState {
     public:
-        GameState(int num_players = 2, int dealer_pos = -1)
-            : rng_(std::random_device{}()), num_players_(num_players), street_(1), boards_(num_players), discards_(num_players) {
+        // ИЗМЕНЕНО: Конструктор теперь может принимать начальное состояние колоды
+        GameState(int num_players = 2, int dealer_pos = -1, const CardSet& initial_deck = {})
+            : rng_(std::random_device{}()), num_players_(num_players), street_(1), boards_(num_players) {
             
-            deck_.resize(52);
-            std::iota(deck_.begin(), deck_.end(), 0);
-            std::shuffle(deck_.begin(), deck_.end(), rng_);
+            if (initial_deck.empty()) {
+                deck_.resize(52);
+                std::iota(deck_.begin(), deck_.end(), 0);
+                std::shuffle(deck_.begin(), deck_.end(), rng_);
+            } else {
+                deck_ = initial_deck;
+                // Не перемешиваем, если колода задана извне
+            }
 
             if (dealer_pos == -1) {
                 std::uniform_int_distribution<int> dist(0, num_players - 1);
@@ -28,6 +34,11 @@ namespace ofc {
                 this->dealer_pos_ = dealer_pos;
             }
             current_player_ = (dealer_pos_ + 1) % num_players_;
+            
+            // ИЗМЕНЕНО: Инициализируем новые поля для сбросов
+            my_discards_.resize(num_players);
+            opponent_discard_counts_.resize(num_players, 0);
+
             deal_cards();
         }
 
@@ -38,6 +49,7 @@ namespace ofc {
         }
 
         inline std::pair<float, float> get_payoffs(const HandEvaluator& evaluator) const {
+            // ... (логика подсчета очков остается без изменений) ...
             const int SCOOP_BONUS = 3;
             const Board& p1_board = boards_[0];
             const Board& p2_board = boards_[1];
@@ -69,6 +81,7 @@ namespace ofc {
         }
 
         inline std::vector<Action> get_legal_actions(size_t action_limit) const {
+            // ... (логика генерации действий остается без изменений) ...
             std::vector<Action> actions;
             if (is_terminal()) return actions;
 
@@ -88,7 +101,6 @@ namespace ofc {
                 }
             }
             
-            // Перемешиваем и обрезаем до финального лимита на всякий случай
             std::shuffle(actions.begin(), actions.end(), rng_);
             if (actions.size() > action_limit) {
                 actions.resize(action_limit);
@@ -97,7 +109,8 @@ namespace ofc {
             return actions;
         }
 
-        inline GameState apply_action(const Action& action) const {
+        // ИЗМЕНЕНО: apply_action теперь принимает 'player_view', чтобы знать, чьими глазами смотреть на мир
+        inline GameState apply_action(const Action& action, int player_view) const {
             GameState next_state(*this);
             const auto& placements = action.first;
             const Card& discarded_card = action.second;
@@ -110,8 +123,16 @@ namespace ofc {
                 else if (row == "middle") next_state.boards_[current_player_].middle[idx] = card;
                 else if (row == "bottom") next_state.boards_[current_player_].bottom[idx] = card;
             }
+
+            // ИЗМЕНЕНО: Логика обработки сброса
             if (discarded_card != INVALID_CARD) {
-                next_state.discards_[current_player_].push_back(discarded_card);
+                if (current_player_ == player_view) {
+                    // Если это наш ход, мы знаем свой сброс
+                    next_state.my_discards_[current_player_].push_back(discarded_card);
+                } else {
+                    // Если это ход оппонента, мы знаем только, что он сбросил карту
+                    next_state.opponent_discard_counts_[player_view]++;
+                }
             }
 
             if (next_state.current_player_ == next_state.dealer_pos_) next_state.street_++;
@@ -121,13 +142,14 @@ namespace ofc {
             return next_state;
         }
         
+        // --- ИЗМЕНЕНО: Обновленные геттеры ---
         int get_street() const { return street_; }
         int get_current_player() const { return current_player_; }
         const CardSet& get_dealt_cards() const { return dealt_cards_; }
         const Board& get_player_board(int player_idx) const { return boards_[player_idx]; }
         const Board& get_opponent_board(int player_idx) const { return boards_[(player_idx + 1) % num_players_]; }
-        const CardSet& get_my_discards(int player_idx) const { return discards_[player_idx]; }
-        const CardSet& get_opponent_discards(int player_idx) const { return discards_[(player_idx + 1) % num_players_]; }
+        const CardSet& get_my_discards(int player_idx) const { return my_discards_[player_idx]; }
+        int get_opponent_discard_count(int player_idx) const { return opponent_discard_counts_[player_idx]; }
         int get_dealer_pos() const { return dealer_pos_; }
         std::mt19937& get_rng() { return rng_; }
 
@@ -142,6 +164,7 @@ namespace ofc {
         }
 
         inline void generate_random_placements(const CardSet& cards, Card discarded, std::vector<Action>& actions, size_t limit) const {
+            // ... (логика генерации расстановок остается без изменений) ...
             const Board& board = boards_[current_player_];
             std::vector<std::pair<std::string, int>> available_slots;
             for(int i=0; i<3; ++i) if(board.top[i] == INVALID_CARD) available_slots.push_back({"top", i});
@@ -186,9 +209,12 @@ namespace ofc {
         int dealer_pos_;
         int current_player_;
         std::vector<Board> boards_;
-        std::vector<CardSet> discards_;
         CardSet deck_;
         CardSet dealt_cards_;
+        
+        // ИЗМЕНЕНО: Новые поля для хранения сбросов
+        std::vector<CardSet> my_discards_;
+        std::vector<int> opponent_discard_counts_;
         
         mutable std::mt19937 rng_;
     };
