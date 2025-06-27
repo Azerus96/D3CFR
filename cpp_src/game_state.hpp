@@ -14,7 +14,6 @@ namespace ofc {
 
     class GameState {
     public:
-        // ИЗМЕНЕНО: Конструктор теперь может принимать начальное состояние колоды
         GameState(int num_players = 2, int dealer_pos = -1, const CardSet& initial_deck = {})
             : rng_(std::random_device{}()), num_players_(num_players), street_(1), boards_(num_players) {
             
@@ -24,7 +23,6 @@ namespace ofc {
                 std::shuffle(deck_.begin(), deck_.end(), rng_);
             } else {
                 deck_ = initial_deck;
-                // Не перемешиваем, если колода задана извне
             }
 
             if (dealer_pos == -1) {
@@ -35,7 +33,6 @@ namespace ofc {
             }
             current_player_ = (dealer_pos_ + 1) % num_players_;
             
-            // ИЗМЕНЕНО: Инициализируем новые поля для сбросов
             my_discards_.resize(num_players);
             opponent_discard_counts_.resize(num_players, 0);
 
@@ -49,7 +46,6 @@ namespace ofc {
         }
 
         inline std::pair<float, float> get_payoffs(const HandEvaluator& evaluator) const {
-            // ... (логика подсчета очков остается без изменений) ...
             const int SCOOP_BONUS = 3;
             const Board& p1_board = boards_[0];
             const Board& p2_board = boards_[1];
@@ -81,7 +77,6 @@ namespace ofc {
         }
 
         inline std::vector<Action> get_legal_actions(size_t action_limit) const {
-            // ... (логика генерации действий остается без изменений) ...
             std::vector<Action> actions;
             if (is_terminal()) return actions;
 
@@ -90,6 +85,7 @@ namespace ofc {
                 cards_to_place = dealt_cards_;
                 generate_random_placements(cards_to_place, INVALID_CARD, actions, action_limit);
             } else {
+                // Для улиц 2-5, мы генерируем действия для каждого из 3 возможных сбросов
                 size_t limit_per_discard = action_limit / 3 + 1;
                 for (int i = 0; i < 3; ++i) {
                     CardSet current_placement_cards;
@@ -101,6 +97,7 @@ namespace ofc {
                 }
             }
             
+            // Финальное перемешивание и обрезка, чтобы гарантировать случайность и соблюдение лимита
             std::shuffle(actions.begin(), actions.end(), rng_);
             if (actions.size() > action_limit) {
                 actions.resize(action_limit);
@@ -109,7 +106,6 @@ namespace ofc {
             return actions;
         }
 
-        // ИЗМЕНЕНО: apply_action теперь принимает 'player_view', чтобы знать, чьими глазами смотреть на мир
         inline GameState apply_action(const Action& action, int player_view) const {
             GameState next_state(*this);
             const auto& placements = action.first;
@@ -124,13 +120,10 @@ namespace ofc {
                 else if (row == "bottom") next_state.boards_[current_player_].bottom[idx] = card;
             }
 
-            // ИЗМЕНЕНО: Логика обработки сброса
             if (discarded_card != INVALID_CARD) {
                 if (current_player_ == player_view) {
-                    // Если это наш ход, мы знаем свой сброс
                     next_state.my_discards_[current_player_].push_back(discarded_card);
                 } else {
-                    // Если это ход оппонента, мы знаем только, что он сбросил карту
                     next_state.opponent_discard_counts_[player_view]++;
                 }
             }
@@ -142,7 +135,6 @@ namespace ofc {
             return next_state;
         }
         
-        // --- ИЗМЕНЕНО: Обновленные геттеры ---
         int get_street() const { return street_; }
         int get_current_player() const { return current_player_; }
         const CardSet& get_dealt_cards() const { return dealt_cards_; }
@@ -163,44 +155,45 @@ namespace ofc {
             deck_.resize(deck_.size() - num_to_deal);
         }
 
+        // =================================================================================
+        // --- САМАЯ ОПТИМАЛЬНАЯ РЕАЛИЗАЦИЯ generate_random_placements ---
+        // =================================================================================
         inline void generate_random_placements(const CardSet& cards, Card discarded, std::vector<Action>& actions, size_t limit) const {
-            // ... (логика генерации расстановок остается без изменений) ...
             const Board& board = boards_[current_player_];
             std::vector<std::pair<std::string, int>> available_slots;
+            available_slots.reserve(13); // Максимум 13 свободных слотов
             for(int i=0; i<3; ++i) if(board.top[i] == INVALID_CARD) available_slots.push_back({"top", i});
             for(int i=0; i<5; ++i) if(board.middle[i] == INVALID_CARD) available_slots.push_back({"middle", i});
             for(int i=0; i<5; ++i) if(board.bottom[i] == INVALID_CARD) available_slots.push_back({"bottom", i});
 
-            if (available_slots.size() < cards.size()) return;
+            size_t k = cards.size();
+            if (available_slots.size() < k) return;
 
-            std::unordered_set<std::string> seen_placements;
-            
-            for (size_t i = 0; i < limit * 3 && actions.size() < limit; ++i) {
-                std::shuffle(available_slots.begin(), available_slots.end(), rng_);
-                
-                CardSet shuffled_cards = cards;
-                std::shuffle(shuffled_cards.begin(), shuffled_cards.end(), rng_);
+            // Создаем временные копии, которые будем изменять
+            CardSet temp_cards = cards;
+            std::vector<std::pair<std::string, int>> temp_slots = available_slots;
+
+            // Генерируем `limit` случайных расстановок без поиска уникальных в цикле
+            for (size_t i = 0; i < limit; ++i) {
+                // Перемешиваем оба вектора: и карты, и слоты
+                std::shuffle(temp_cards.begin(), temp_cards.end(), rng_);
+                std::shuffle(temp_slots.begin(), temp_slots.end(), rng_);
 
                 std::vector<Placement> current_placement;
-                for(size_t j = 0; j < cards.size(); ++j) {
-                    current_placement.push_back({shuffled_cards[j], available_slots[j]});
+                current_placement.reserve(k);
+                for(size_t j = 0; j < k; ++j) {
+                    current_placement.push_back({temp_cards[j], temp_slots[j]});
                 }
                 
+                // Сортировка нужна для консистентности, если вдруг понадобится
+                // сравнивать действия, но для CFR это не обязательно. Оставляем для порядка.
                 std::sort(current_placement.begin(), current_placement.end(), 
                     [](const Placement& a, const Placement& b){
                         if (a.second.first != b.second.first) return a.second.first < b.second.first;
                         return a.second.second < b.second.second;
                 });
 
-                std::string key;
-                for(const auto& p : current_placement) {
-                    key += std::to_string(p.first) + p.second.first + std::to_string(p.second.second);
-                }
-
-                if (seen_placements.find(key) == seen_placements.end()) {
-                    seen_placements.insert(key);
-                    actions.push_back({current_placement, discarded});
-                }
+                actions.push_back({current_placement, discarded});
             }
         }
 
@@ -212,7 +205,6 @@ namespace ofc {
         CardSet deck_;
         CardSet dealt_cards_;
         
-        // ИЗМЕНЕНО: Новые поля для хранения сбросов
         std::vector<CardSet> my_discards_;
         std::vector<int> opponent_discard_counts_;
         
