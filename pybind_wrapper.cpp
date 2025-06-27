@@ -31,13 +31,13 @@ PYBIND11_MODULE(ofc_engine, m) {
     // Биндинг для менеджера запросов
     py::class_<ofc::RequestManager, std::shared_ptr<ofc::RequestManager>>(m, "RequestManager")
         .def(py::init<>())
-        // ИСПРАВЛЕНО: Добавлен call_guard для освобождения GIL во время ожидания.
-        // Это предотвращает deadlock.
+        // Эта функция блокирующая, поэтому освобождаем GIL
         .def("get_requests", &ofc::RequestManager::get_requests, py::arg("max_batch_size"), py::call_guard<py::gil_scoped_release>())
         .def("post_results", &ofc::RequestManager::post_results);
 
-    // Биндинг для солвера, который теперь принимает указатель на менеджер
+    // Биндинг для солвера
     py::class_<ofc::DeepMCCFR>(m, "DeepMCCFR")
         .def(py::init<std::shared_ptr<ofc::RequestManager>, size_t>())
-        .def("run_traversal", &ofc::DeepMCCFR::run_traversal, "Runs one full game traversal and returns training data.");
+        // Эта функция тоже блокирующая (внутри она ждет promise), поэтому тоже освобождаем GIL
+        .def("run_traversal", &ofc::DeepMCCFR::run_traversal, "Runs one full game traversal and returns training data.", py::call_guard<py::gil_scoped_release>());
 }
