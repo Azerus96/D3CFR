@@ -17,7 +17,7 @@ from ofc_engine import DeepMCCFR
 
 # --- ГИПЕРПАРАМЕТРЫ ДЛЯ ТЕСТА ---
 INPUT_SIZE = 1486 
-ACTION_LIMIT = 20 # Уменьшаем для скорости теста
+ACTION_LIMIT = 10 # Уменьшаем для скорости теста
 LEARNING_RATE = 0.001
 REPLAY_BUFFER_SIZE = 10000
 BATCH_SIZE = 256
