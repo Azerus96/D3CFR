@@ -5,19 +5,16 @@
 #include <iostream>
 #include <numeric>
 #include <algorithm>
-#include <torch/torch.h> // <--- ADD THIS
+#include <torch/torch.h>
 
 namespace ofc {
 
-// MODIFIED: Constructor implementation
-DeepMCCFR::DeepMCCFR(const std::string& model_path, size_t action_limit) 
-    : action_limit_(action_limit), device_(torch::kCPU) { // Initialize device to CPU
+// ИЗМЕНЕНО: Реализация конструктора
+DeepMCCFR::DeepMCCFR(const std::string& model_path, size_t action_limit, SharedReplayBuffer* buffer) 
+    : action_limit_(action_limit), device_(torch::kCPU), replay_buffer_(buffer) { // Сохраняем указатель на буфер
     try {
-        // Load the TorchScript model from the provided path
         model_ = torch::jit::load(model_path);
-        // Set the model to evaluation mode
         model_.eval();
-        // Move the model to the specified device (CPU)
         model_.to(device_);
         std::cout << "C++: LibTorch model loaded successfully from " << model_path << std::endl;
     } catch (const c10::Error& e) {
@@ -25,18 +22,16 @@ DeepMCCFR::DeepMCCFR(const std::string& model_path, size_t action_limit)
     }
 }
 
-std::vector<TrainingSample> DeepMCCFR::run_traversal() {
-    // This function's implementation remains the same
-    std::vector<TrainingSample> samples;
+// ИЗМЕНЕНО: run_traversal теперь ничего не возвращает
+void DeepMCCFR::run_traversal() {
     GameState state_p0;
-    traverse(state_p0, 0, samples);
+    traverse(state_p0, 0);
     GameState state_p1;
-    traverse(state_p1, 1, samples);
-    return samples;
+    traverse(state_p1, 1);
 }
 
+// featurize остается без изменений
 std::vector<float> DeepMCCFR::featurize(const GameState& state, int player_view) {
-    // This function's implementation remains the same
     const Board& my_board = state.get_player_board(player_view);
     const Board& opp_board = state.get_opponent_board(player_view);
     const int FEATURE_SIZE = 1486;
@@ -78,7 +73,9 @@ std::vector<float> DeepMCCFR::featurize(const GameState& state, int player_view)
     return features;
 }
 
-std::map<int, float> DeepMCCFR::traverse(GameState& state, int traversing_player, std::vector<TrainingSample>& samples) {
+
+// ИЗМЕНЕНО: traverse больше не принимает вектор сэмплов
+std::map<int, float> DeepMCCFR::traverse(GameState& state, int traversing_player) {
     if (state.is_terminal()) {
         auto payoffs = state.get_payoffs(evaluator_);
         return {{0, payoffs.first}, {1, payoffs.second}};
@@ -90,7 +87,7 @@ std::map<int, float> DeepMCCFR::traverse(GameState& state, int traversing_player
 
     if (num_actions == 0) {
         UndoInfo undo_info = state.apply_action({{}, INVALID_CARD}, traversing_player);
-        auto result = traverse(state, traversing_player, samples);
+        auto result = traverse(state, traversing_player);
         state.undo_action(undo_info, traversing_player);
         return result;
     }
@@ -98,34 +95,23 @@ std::map<int, float> DeepMCCFR::traverse(GameState& state, int traversing_player
     if (current_player != traversing_player) {
         int action_idx = state.get_rng()() % num_actions;
         UndoInfo undo_info = state.apply_action(legal_actions[action_idx], traversing_player);
-        auto result = traverse(state, traversing_player, samples);
+        auto result = traverse(state, traversing_player);
         state.undo_action(undo_info, traversing_player);
         return result;
     }
 
     std::vector<float> infoset_vec = featurize(state, traversing_player);
     
-    // --- START: REPLACEMENT FOR REQUEST MANAGER ---
     std::vector<float> regrets;
     {
-        // Ensure no gradient calculations are performed
         torch::NoGradGuard no_grad;
-
-        // Convert the feature vector to a torch tensor without copying data
         auto options = torch::TensorOptions().dtype(torch::kFloat32);
         torch::Tensor input_tensor = torch::from_blob(infoset_vec.data(), {1, (long)infoset_vec.size()}, options).to(device_);
-
-        // Create a vector of inputs for the model
         std::vector<torch::jit::IValue> inputs;
         inputs.push_back(input_tensor);
-
-        // Run inference
         at::Tensor output_tensor = model_.forward(inputs).toTensor();
-
-        // Copy the results back to a std::vector
         regrets.assign(output_tensor.data_ptr<float>(), output_tensor.data_ptr<float>() + num_actions);
     }
-    // --- END: REPLACEMENT FOR REQUEST MANAGER ---
 
     std::vector<float> strategy(num_actions);
     float total_positive_regret = 0.0f;
@@ -145,7 +131,7 @@ std::map<int, float> DeepMCCFR::traverse(GameState& state, int traversing_player
 
     for (int i = 0; i < num_actions; ++i) {
         UndoInfo undo_info = state.apply_action(legal_actions[i], traversing_player);
-        action_utils[i] = traverse(state, traversing_player, samples);
+        action_utils[i] = traverse(state, traversing_player); // Рекурсивный вызов
         state.undo_action(undo_info, traversing_player);
 
         for(auto const& [player_idx, util] : action_utils[i]) {
@@ -158,7 +144,8 @@ std::map<int, float> DeepMCCFR::traverse(GameState& state, int traversing_player
         true_regrets[i] = action_utils[i][current_player] - node_util[current_player];
     }
     
-    samples.push_back({infoset_vec, true_regrets, num_actions});
+    // ИЗМЕНЕНО: Вместо добавления в локальный вектор, пишем напрямую в общий буфер.
+    replay_buffer_->push(infoset_vec, true_regrets, num_actions);
 
     return node_util;
 }
