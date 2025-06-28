@@ -1,10 +1,17 @@
-# D2CFR-main/CMakeLists.txt (ФИНАЛЬНАЯ ВЕРСИЯ 3.0)
+# D2CFR-main/CMakeLists.txt (ВЕРСИЯ 4.0 - ПУЛЕНЕПРОБИВАЕМАЯ)
 
 cmake_minimum_required(VERSION 3.10)
 project(OFCEngine)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# --- КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: ФОРСИРУЕМ СТАРЫЙ ABI ---
+# Это говорит компилятору использовать тот же "диалект" C++,
+# с которым были скомпилированы официальные бинарники LibTorch.
+# Это решает проблему `undefined symbol` с `std::__cxx11`.
+add_compile_definitions(_GLIBCXX_USE_CXX11_ABI=0)
+# ----------------------------------------------------
 
 include(FetchContent)
 FetchContent_Declare(
@@ -22,13 +29,10 @@ list(APPEND SOURCES "pybind_wrapper.cpp")
 
 pybind11_add_module(ofc_engine SHARED ${SOURCES})
 
-# --- КЛЮЧЕВОЕ ИЗМЕНЕНИЕ ЗДЕСЬ ---
-# Добавляем пути к нашим заголовочным файлам
 target_include_directories(ofc_engine PRIVATE
     "${PROJECT_SOURCE_DIR}/cpp_src"
     "${PROJECT_SOURCE_DIR}/cpp_src/ompeval"
 )
-# ---------------------------------
 
 target_link_libraries(ofc_engine PRIVATE OpenMP::OpenMP_CXX ${TORCH_LIBRARIES})
 
