@@ -1,14 +1,13 @@
+// D2CFR-main/cpp_src/DeepMCCFR.hpp
+
 #pragma once
 #include "game_state.hpp"
 #include "hand_evaluator.hpp"
-#include "request_manager.hpp"
-#include <pybind11/pybind11.h>
-#include <pybind11/stl.h>
+// #include "request_manager.hpp" // REMOVE THIS LINE
+#include <torch/script.h> // <--- ADD THIS
 #include <vector>
 #include <map>
 #include <memory>
-
-namespace py = pybind11;
 
 namespace ofc {
 
@@ -20,15 +19,21 @@ struct TrainingSample {
 
 class DeepMCCFR {
 public:
-    DeepMCCFR(std::shared_ptr<RequestManager> manager, size_t action_limit);
+    // MODIFIED: Constructor now takes the model path instead of the manager
+    DeepMCCFR(const std::string& model_path, size_t action_limit);
     std::vector<TrainingSample> run_traversal();
 
 private:
     HandEvaluator evaluator_;
-    std::shared_ptr<RequestManager> request_manager_;
+    // REMOVED: No longer need the request manager
+    // std::shared_ptr<RequestManager> request_manager_; 
+    
+    // ADDED: The TorchScript model
+    torch::jit::script::Module model_; 
+    torch::Device device_; // ADDED: To specify CPU/GPU
+
     size_t action_limit_;
 
-    // ИЗМЕНЕНО: traverse теперь принимает GameState по ссылке
     std::map<int, float> traverse(GameState& state, int traversing_player, std::vector<TrainingSample>& samples);
     std::vector<float> featurize(const GameState& state, int player_view);
 };
