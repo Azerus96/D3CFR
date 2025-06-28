@@ -7,17 +7,20 @@ import os
 import sys
 
 # --- LIBTORCH CONFIGURATION ---
-# Set this environment variable to the path of your unzipped libtorch directory
-# For example: export LIBTORCH_PATH=/path/to/libtorch
 libtorch_path = os.getenv('LIBTORCH_PATH')
 if not libtorch_path:
     raise EnvironmentError("LIBTORCH_PATH environment variable not set. Please set it to your LibTorch directory.")
+
+# --- BOOST CONFIGURATION ---
+# Убедитесь, что Boost установлен в вашей системе.
+# Например, для Ubuntu: sudo apt-get install libboost-all-dev
+# Путь к библиотекам Boost может понадобиться, если они не в стандартных путях
+boost_lib_path = os.getenv('BOOST_LIB_PATH', '/usr/lib/x86_64-linux-gnu') # Пример для Ubuntu
 
 # --- COMPILER ARGUMENTS ---
 cpp_args = ['-std=c++17', '-O3', '-fopenmp']
 link_args = ['-fopenmp']
 
-# For macOS
 if sys.platform == 'darwin':
     cpp_args = ['-std=c++17', '-O3', '-Xpreprocessor', '-fopenmp']
     link_args = ['-lomp']
@@ -37,19 +40,22 @@ ext_modules = [
             pybind11.get_include(),
             "cpp_src",
             "cpp_src/ompeval",
-            # ADDED: LibTorch include paths
             os.path.join(libtorch_path, 'include'),
             os.path.join(libtorch_path, 'include', 'torch', 'csrc', 'api', 'include'),
+            # Может понадобиться, если Boost не в стандартных путях
+            # os.getenv('BOOST_INCLUDE_PATH', '/usr/include') 
         ],
         language='c++',
         extra_compile_args=cpp_args,
-        # MODIFIED: Linking arguments for LibTorch
-        library_dirs=[os.path.join(libtorch_path, 'lib')],
+        library_dirs=[
+            os.path.join(libtorch_path, 'lib'),
+            boost_lib_path 
+        ],
         extra_link_args=link_args + [
             '-ltorch', 
             '-ltorch_cpu', 
             '-lc10',
-            # This is important for the dynamic linker to find the .so files at runtime
+            '-lboost_interprocess', # <-- ДОБАВЛЕНО: линкуем библиотеку Boost
             f'-Wl,-rpath,{os.path.join(libtorch_path, "lib")}'
         ]
     ),
@@ -57,9 +63,9 @@ ext_modules = [
 
 setup(
     name="ofc_engine",
-    version="3.0.0", # Version bump!
+    version="4.0.0", # State-of-the-art!
     author="Azerus96 & AI Solver",
-    description="Deep MCCFR solver for Pineapple OFC poker with C++ inference.",
+    description="SOTA Deep MCCFR solver for OFC poker with C++ inference and shared memory buffer.",
     ext_modules=ext_modules,
     zip_safe=False,
 )
