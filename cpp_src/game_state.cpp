@@ -1,6 +1,195 @@
 #include "game_state.hpp"
 
 namespace ofc {
-    // Этот файл теперь может быть пустым, так как все методы GameState
-    // реализованы inline в game_state.hpp для производительности.
+
+    GameState::GameState(int num_players, int dealer_pos)
+        : rng_(std::random_device{}()), num_players_(num_players), street_(1), boards_(num_players) {
+        
+        deck_.resize(52);
+        std::iota(deck_.begin(), deck_.end(), 0);
+        std::shuffle(deck_.begin(), deck_.end(), rng_);
+
+        if (dealer_pos == -1) {
+            std::uniform_int_distribution<int> dist(0, num_players - 1);
+            dealer_pos_ = dist(rng_);
+        } else {
+            this->dealer_pos_ = dealer_pos;
+        }
+        current_player_ = (dealer_pos_ + 1) % num_players_;
+        
+        my_discards_.resize(num_players);
+        opponent_discard_counts_.resize(num_players, 0);
+
+        deal_cards();
+    }
+
+    std::pair<float, float> GameState::get_payoffs(const HandEvaluator& evaluator) const {
+        const int SCOOP_BONUS = 3;
+        const Board& p1_board = boards_[0];
+        const Board& p2_board = boards_[1];
+        bool p1_foul = p1_board.is_foul(evaluator);
+        bool p2_foul = p2_board.is_foul(evaluator);
+        int p1_royalty = p1_foul ? 0 : p1_board.get_total_royalty(evaluator);
+        int p2_royalty = p2_foul ? 0 : p2_board.get_total_royalty(evaluator);
+
+        if (p1_foul && p2_foul) return {0.0f, 0.0f};
+        if (p1_foul) return {-(float)(SCOOP_BONUS + p2_royalty), (float)(SCOOP_BONUS + p2_royalty)};
+        if (p2_foul) return {(float)(SCOOP_BONUS + p1_royalty), -(float)(SCOOP_BONUS + p1_royalty)};
+
+        int line_score = 0;
+        CardSet p1_top, p1_mid, p1_bot, p2_top, p2_mid, p2_bot;
+        p1_board.get_row_cards("top", p1_top);
+        p1_board.get_row_cards("middle", p1_mid);
+        p1_board.get_row_cards("bottom", p1_bot);
+        p2_board.get_row_cards("top", p2_top);
+        p2_board.get_row_cards("middle", p2_mid);
+        p2_board.get_row_cards("bottom", p2_bot);
+
+        if (evaluator.evaluate(p1_top) < evaluator.evaluate(p2_top)) line_score++; else line_score--;
+        if (evaluator.evaluate(p1_mid) < evaluator.evaluate(p2_mid)) line_score++; else line_score--;
+        if (evaluator.evaluate(p1_bot) < evaluator.evaluate(p2_bot)) line_score++; else line_score--;
+
+        if (abs(line_score) == 3) line_score = (line_score > 0) ? SCOOP_BONUS : -SCOOP_BONUS;
+        float p1_total = (float)(line_score + p1_royalty - p2_royalty);
+        return {p1_total, -p1_total};
+    }
+
+    std::vector<Action> GameState::get_legal_actions(size_t action_limit) const {
+        std::vector<Action> actions;
+        if (is_terminal()) return actions;
+
+        CardSet cards_to_place;
+        if (street_ == 1) {
+            cards_to_place = dealt_cards_;
+            generate_random_placements(cards_to_place, INVALID_CARD, actions, action_limit);
+        } else {
+            size_t limit_per_discard = action_limit / 3 + 1;
+            for (int i = 0; i < 3; ++i) {
+                CardSet current_placement_cards;
+                Card current_discarded = dealt_cards_[i];
+                for (int j = 0; j < 3; ++j) {
+                    if (i != j) current_placement_cards.push_back(dealt_cards_[j]);
+                }
+                generate_random_placements(current_placement_cards, current_discarded, actions, limit_per_discard);
+            }
+        }
+        
+        std::shuffle(actions.begin(), actions.end(), rng_);
+        if (actions.size() > action_limit) {
+            actions.resize(action_limit);
+        }
+        
+        return actions;
+    }
+
+    // ИЗМЕНЕНО: Реализация apply_action
+    UndoInfo GameState::apply_action(const Action& action, int player_view) {
+        UndoInfo undo_info;
+        undo_info.action = action;
+        undo_info.prev_street = street_;
+        undo_info.prev_current_player = current_player_;
+        undo_info.prev_dealt_cards = dealt_cards_;
+
+        const auto& placements = action.first;
+        const Card& discarded_card = action.second;
+
+        for (const auto& p : placements) {
+            const Card& card = p.first;
+            const std::string& row = p.second.first;
+            int idx = p.second.second;
+            if (row == "top") boards_[current_player_].top[idx] = card;
+            else if (row == "middle") boards_[current_player_].middle[idx] = card;
+            else if (row == "bottom") boards_[current_player_].bottom[idx] = card;
+        }
+
+        if (discarded_card != INVALID_CARD) {
+            if (current_player_ == player_view) {
+                my_discards_[current_player_].push_back(discarded_card);
+            } else {
+                opponent_discard_counts_[player_view]++;
+            }
+        }
+
+        if (current_player_ == dealer_pos_) street_++;
+        current_player_ = (current_player_ + 1) % num_players_;
+        
+        if (!is_terminal()) deal_cards();
+        
+        return undo_info;
+    }
+
+    // ИЗМЕНЕНО: Реализация undo_action
+    void GameState::undo_action(const UndoInfo& undo_info, int player_view) {
+        // Восстанавливаем состояние до действия
+        street_ = undo_info.prev_street;
+        current_player_ = undo_info.prev_current_player;
+
+        // Восстанавливаем колоду и розданные карты
+        deck_.insert(deck_.end(), dealt_cards_.begin(), dealt_cards_.end());
+        dealt_cards_ = undo_info.prev_dealt_cards;
+
+        const auto& placements = undo_info.action.first;
+        const Card& discarded_card = undo_info.action.second;
+
+        // Убираем карты с доски
+        for (const auto& p : placements) {
+            const std::string& row = p.second.first;
+            int idx = p.second.second;
+            if (row == "top") boards_[current_player_].top[idx] = INVALID_CARD;
+            else if (row == "middle") boards_[current_player_].middle[idx] = INVALID_CARD;
+            else if (row == "bottom") boards_[current_player_].bottom[idx] = INVALID_CARD;
+        }
+
+        // Откатываем сброс
+        if (discarded_card != INVALID_CARD) {
+            if (current_player_ == player_view) {
+                my_discards_[current_player_].pop_back();
+            } else {
+                opponent_discard_counts_[player_view]--;
+            }
+        }
+    }
+
+    void GameState::deal_cards() {
+        int num_to_deal = (street_ == 1) ? 5 : 3;
+        if (deck_.size() < (size_t)num_to_deal) {
+            street_ = 6; return;
+        }
+        dealt_cards_.assign(deck_.end() - num_to_deal, deck_.end());
+        deck_.resize(deck_.size() - num_to_deal);
+    }
+
+    void GameState::generate_random_placements(const CardSet& cards, Card discarded, std::vector<Action>& actions, size_t limit) const {
+        const Board& board = boards_[current_player_];
+        std::vector<std::pair<std::string, int>> available_slots;
+        available_slots.reserve(13);
+        for(int i=0; i<3; ++i) if(board.top[i] == INVALID_CARD) available_slots.push_back({"top", i});
+        for(int i=0; i<5; ++i) if(board.middle[i] == INVALID_CARD) available_slots.push_back({"middle", i});
+        for(int i=0; i<5; ++i) if(board.bottom[i] == INVALID_CARD) available_slots.push_back({"bottom", i});
+
+        size_t k = cards.size();
+        if (available_slots.size() < k) return;
+
+        CardSet temp_cards = cards;
+        std::vector<std::pair<std::string, int>> temp_slots = available_slots;
+
+        for (size_t i = 0; i < limit; ++i) {
+            std::shuffle(temp_cards.begin(), temp_cards.end(), rng_);
+            std::shuffle(temp_slots.begin(), temp_slots.end(), rng_);
+
+            std::vector<Placement> current_placement;
+            current_placement.reserve(k);
+            for(size_t j = 0; j < k; ++j) {
+                current_placement.push_back({temp_cards[j], temp_slots[j]});
+            }
+            
+            std::sort(current_placement.begin(), current_placement.end(), 
+                [](const Placement& a, const Placement& b){
+                    if (a.second.first != b.second.first) return a.second.first < b.second.first;
+                    return a.second.second < b.second.second;
+            });
+
+            actions.push_back({current_placement, discarded});
+        }
+    }
 }
