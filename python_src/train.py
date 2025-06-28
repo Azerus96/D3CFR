@@ -5,13 +5,13 @@ import time
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.nn.utils import clip_grad_norm_
 import numpy as np
 import concurrent.futures
 import traceback
 
 from .model import DuelingNetwork
 from .replay_buffer import ReplayBuffer
-# MODIFIED: No longer need RequestManager or PredictionResult from the engine
 from ofc_engine import DeepMCCFR
 
 # --- HYPERPARAMETERS ---
@@ -23,11 +23,8 @@ BATCH_SIZE = 2048
 TRAINING_BLOCK_SIZE = 24
 SAVE_INTERVAL_BLOCKS = 5 
 MODEL_PATH = "d2cfr_model.pth"
-# This is the path to the *TorchScript* model, which we'll create.
 TORCHSCRIPT_MODEL_PATH = "d2cfr_model_script.pt"
 NUM_WORKERS = 24
-
-# REMOVED: The inference_thread_func is no longer needed.
 
 def main():
     torch.set_num_threads(1)
@@ -49,18 +46,16 @@ def main():
         except Exception as e:
             print(f"Could not load model: {e}. Starting from scratch.", flush=True)
 
-    # --- ADDED: Convert and save the model in TorchScript format ---
+    # --- Convert and save the model in TorchScript format for C++ ---
     print("Converting model to TorchScript for C++...", flush=True)
-    model.eval() # Important to be in eval mode for tracing
-    # Use an example tensor to trace the model
+    model.eval()
     example_input = torch.randn(1, INPUT_SIZE).to(device)
     traced_script_module = torch.jit.trace(model, example_input)
     traced_script_module.save(TORCHSCRIPT_MODEL_PATH)
     print(f"TorchScript model saved to {TORCHSCRIPT_MODEL_PATH}", flush=True)
-    # --- END ADDED SECTION ---
 
-    # MODIFIED: Create solvers, passing the path to the TorchScript model
-    # The C++ engine will load this file directly.
+    # --- Create C++ solver instances ---
+    # Each solver will load the TorchScript model directly.
     solvers = [DeepMCCFR(TORCHSCRIPT_MODEL_PATH, ACTION_LIMIT) for _ in range(NUM_WORKERS)]
     print("Solver instances created. Starting training loop...", flush=True)
 
@@ -95,22 +90,28 @@ def main():
                     print(f"Block {block_counter} | Total Traversals: {total_traversals} | Buffer size {len(replay_buffer)} is too small, skipping training.", flush=True)
                     continue
 
-                # --- Training Phase (Model is only used here in Python) ---
+                # --- Training Phase ---
                 model.train()
                 
-                infosets, targets, _ = replay_buffer.sample(BATCH_SIZE)
+                infosets, targets, num_actions_list = replay_buffer.sample(BATCH_SIZE)
                 if infosets is None: continue
 
                 infosets = infosets.to(device)
                 targets = targets.to(device)
 
                 optimizer.zero_grad()
+                
                 predictions = model(infosets)
                 
-                # The mask is still a good idea to avoid calculating loss on padding
-                mask = (targets != 0).float()
-                loss = criterion(predictions * mask, targets)
+                # Create a mask to only calculate loss on valid actions
+                num_actions_tensor = torch.tensor(num_actions_list, device=device, dtype=torch.int64).unsqueeze(1)
+                indices = torch.arange(ACTION_LIMIT, device=device).unsqueeze(0)
+                mask = (indices < num_actions_tensor).float()
                 
+                predictions_masked = predictions * mask
+                targets_masked = targets * mask
+
+                loss = criterion(predictions_masked, targets_masked)
                 loss.backward()
                 clip_grad_norm_(model.parameters(), 1.0)
                 optimizer.step()
@@ -120,16 +121,30 @@ def main():
                 
                 print(f"Block {block_counter} | Total: {total_traversals:,} | Loss: {loss.item():.6f} | Speed: {traversals_per_sec:.2f} trav/s", flush=True)
 
+                # --- Model Saving and GitHub Push Logic ---
                 if block_counter % SAVE_INTERVAL_BLOCKS == 0:
                     print("-" * 100, flush=True)
                     print(f"Saving models at traversal {total_traversals:,}...", flush=True)
+                    
                     # Save the standard PyTorch model for continued training
                     torch.save(model.state_dict(), MODEL_PATH)
+                    
                     # Re-save the TorchScript version for the C++ engine
                     model.eval()
                     traced_script_module = torch.jit.trace(model, example_input)
                     traced_script_module.save(TORCHSCRIPT_MODEL_PATH)
                     print("Models saved successfully.", flush=True)
+                    
+                    # --- Your original code block ---
+                    print("Pushing progress to GitHub...", flush=True)
+                    os.system(f'git add {MODEL_PATH}')
+                    # Also add the new TorchScript model
+                    os.system(f'git add {TORCHSCRIPT_MODEL_PATH}') 
+                    os.system(f'git commit -m "Training checkpoint after {total_traversals} traversals"')
+                    os.system('git push')
+                    print("Progress pushed successfully.", flush=True)
+                    # --- End of block ---
+                
                     print("-" * 100, flush=True)
 
     except KeyboardInterrupt:
@@ -142,6 +157,8 @@ def main():
     except Exception as e:
         print(f"\nAn unexpected error occurred: {e}", flush=True)
         traceback.print_exc()
+        torch.save(model.state_dict(), "d2cfr_model_error.pth")
+        print("Saved an emergency copy of the model.", flush=True)
 
 if __name__ == "__main__":
     main()
