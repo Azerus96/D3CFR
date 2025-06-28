@@ -11,13 +11,6 @@
 
 namespace ofc {
 
-// Эта структура больше не нужна для передачи в Python, но оставим ее для ясности
-struct TrainingSample {
-    std::vector<float> infoset_vector;
-    std::vector<float> target_regrets;
-    int num_actions;
-};
-
 class DeepMCCFR {
 public:
     // ИЗМЕНЕНО: Конструктор теперь принимает указатель на общий буфер
