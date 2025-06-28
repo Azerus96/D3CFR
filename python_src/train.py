@@ -11,24 +11,23 @@ import concurrent.futures
 import traceback
 
 from .model import DuelingNetwork
-# ИЗМЕНЕНО: ReplayBuffer больше не нужен, импортируем новые классы из C++
-from ofc_engine import DeepMCCFR, SharedReplayBuffer, cleanup_shared_memory
+# ИЗМЕНЕНО: cleanup_shared_memory больше не нужен
+from ofc_engine import DeepMCCFR, SharedReplayBuffer
 
 # --- HYPERPARAMETERS ---
 INPUT_SIZE = 1486 
 ACTION_LIMIT = 24 
 LEARNING_RATE = 0.001
-REPLAY_BUFFER_CAPACITY = 2000000 # Вместимость буфера
+REPLAY_BUFFER_CAPACITY = 2000000
 BATCH_SIZE = 2048
 TRAINING_BLOCK_SIZE = 24
 SAVE_INTERVAL_BLOCKS = 5 
 MODEL_PATH = "d2cfr_model.pth"
 TORCHSCRIPT_MODEL_PATH = "d2cfr_model_script.pt"
 NUM_WORKERS = 24
-# ИМЯ ДЛЯ СЕГМЕНТА ОБЩЕЙ ПАМЯТИ
-SHARED_MEMORY_NAME = os.getenv("SHARED_MEMORY_NAME", "d2cfr_replay_buffer_default")
+# УДАЛЕНО: Имя общей памяти больше не нужно
+
 def main():
-    # Устанавливаем device (GPU, если доступен)
     torch.set_num_threads(1)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device for PyTorch: {device}", flush=True)
@@ -39,8 +38,6 @@ def main():
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
     criterion = nn.MSELoss()
     
-    # ИЗМЕНЕНО: Удаляем старый ReplayBuffer
-
     if os.path.exists(MODEL_PATH):
         print(f"Loading existing model from {MODEL_PATH}", flush=True)
         try:
@@ -49,7 +46,6 @@ def main():
         except Exception as e:
             print(f"Could not load model: {e}. Starting from scratch.", flush=True)
 
-    # --- Конвертация модели в TorchScript ---
     print("Converting model to TorchScript for C++...", flush=True)
     model.eval()
     example_input = torch.randn(1, INPUT_SIZE).to(device)
@@ -57,20 +53,14 @@ def main():
     traced_script_module.save(TORCHSCRIPT_MODEL_PATH)
     print(f"TorchScript model saved to {TORCHSCRIPT_MODEL_PATH}", flush=True)
 
-    # --- Создание общего буфера и C++ солверов ---
-    # Очищаем старый сегмент памяти, если он остался от предыдущего запуска
-    try:
-        cleanup_shared_memory(SHARED_MEMORY_NAME)
-        print("Cleaned up previous shared memory segment.", flush=True)
-    except Exception:
-        pass # Ничего страшного, если его не было
-
-    print(f"Creating shared replay buffer '{SHARED_MEMORY_NAME}' with capacity {REPLAY_BUFFER_CAPACITY}", flush=True)
-    replay_buffer = SharedReplayBuffer(SHARED_MEMORY_NAME, REPLAY_BUFFER_CAPACITY)
+    # --- ИЗМЕНЕНО: Создание буфера ---
+    print(f"Creating in-memory replay buffer with capacity {REPLAY_BUFFER_CAPACITY}", flush=True)
+    # Теперь конструктор не принимает имя, только вместимость
+    replay_buffer = SharedReplayBuffer(REPLAY_BUFFER_CAPACITY)
     print("Buffer created.", flush=True)
 
     solvers = [DeepMCCFR(TORCHSCRIPT_MODEL_PATH, ACTION_LIMIT, replay_buffer) for _ in range(NUM_WORKERS)]
-    print("Solver instances created and linked to the shared buffer.", flush=True)
+    print("Solver instances created and linked to the buffer.", flush=True)
 
     total_traversals = 0
     block_counter = 0
@@ -82,10 +72,8 @@ def main():
                 
                 print(f"Submitting {TRAINING_BLOCK_SIZE} traversal tasks to {NUM_WORKERS} workers...", flush=True)
                 
-                # ИЗМЕНЕНО: Задачи теперь ничего не возвращают
                 futures = [executor.submit(solvers[i % NUM_WORKERS].run_traversal) for i in range(TRAINING_BLOCK_SIZE)]
                 
-                # Просто ждем, пока все воркеры закончат писать в буфер
                 concurrent.futures.wait(futures)
 
                 total_traversals += TRAINING_BLOCK_SIZE
@@ -97,13 +85,10 @@ def main():
                     print(f"Block {block_counter} | Total Traversals: {total_traversals} | Buffer size {buffer_size} is too small, skipping training.", flush=True)
                     continue
 
-                # --- Training Phase ---
                 model.train()
                 
-                # ИЗМЕНЕНО: Сэмплируем напрямую из C++ буфера в NumPy массивы
                 infosets_np, targets_np = replay_buffer.sample(BATCH_SIZE)
                 
-                # Создаем тензоры из NumPy БЕЗ КОПИРОВАНИЯ
                 infosets = torch.from_numpy(infosets_np).to(device)
                 targets = torch.from_numpy(targets_np).to(device)
 
@@ -111,7 +96,6 @@ def main():
                 
                 predictions = model(infosets)
                 
-                # Маска больше не нужна, так как C++ уже заполняет нулями
                 loss = criterion(predictions, targets)
                 loss.backward()
                 clip_grad_norm_(model.parameters(), 1.0)
@@ -123,7 +107,6 @@ def main():
                 print(f"Block {block_counter} | Total: {total_traversals:,} | Loss: {loss.item():.6f} | Speed: {traversals_per_sec:.2f} trav/s", flush=True)
 
                 if block_counter % SAVE_INTERVAL_BLOCKS == 0:
-                    # ... (логика сохранения и пуша в Git остается без изменений)
                     print("-" * 100, flush=True)
                     print(f"Saving models at traversal {total_traversals:,}...", flush=True)
                     torch.save(model.state_dict(), MODEL_PATH)
@@ -151,10 +134,8 @@ def main():
         torch.save(model.state_dict(), "d2cfr_model_error.pth")
         print("Saved an emergency copy of the model.", flush=True)
     finally:
-        # ОБЯЗАТЕЛЬНО: Очищаем общую память при выходе
-        print("Cleaning up shared memory segment...", flush=True)
-        cleanup_shared_memory(SHARED_MEMORY_NAME)
-        print("Cleanup complete.", flush=True)
+        # УДАЛЕНО: Очистка общей памяти больше не нужна.
+        print("Training finished.")
 
 if __name__ == "__main__":
     main()
