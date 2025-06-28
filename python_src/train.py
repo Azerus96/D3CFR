@@ -16,7 +16,7 @@ import traceback
 # PyTorch, NumPy и OpenMP (в вашем C++ коде).
 # 8 - это безопасное и эффективное значение для начала.
 # Оно оставляет много ядер для параллельной работы воркеров.
-NUM_COMPUTATION_THREADS = "8"
+NUM_COMPUTATION_THREADS = "1"
 os.environ['OMP_NUM_THREADS'] = NUM_COMPUTATION_THREADS
 os.environ['OPENBLAS_NUM_THREADS'] = NUM_COMPUTATION_THREADS
 os.environ['MKL_NUM_THREADS'] = NUM_COMPUTATION_THREADS
@@ -31,17 +31,17 @@ from ofc_engine import DeepMCCFR, SharedReplayBuffer
 
 # --- HYPERPARAMETERS ---
 INPUT_SIZE = 1486 
-ACTION_LIMIT = 24 
+ACTION_LIMIT = 48 
 LEARNING_RATE = 0.001
 REPLAY_BUFFER_CAPACITY = 2000000
-BATCH_SIZE = 2048
-TRAINING_BLOCK_SIZE = 96 # Можно увеличить, чтобы лучше утилизировать ядра
+BATCH_SIZE = 1024
+TRAINING_BLOCK_SIZE = 32 # Можно увеличить, чтобы лучше утилизировать ядра
 SAVE_INTERVAL_BLOCKS = 5 
 MODEL_PATH = "d2cfr_model.pth"
 TORCHSCRIPT_MODEL_PATH = "d2cfr_model_script.pt"
 # Оптимальное количество воркеров - это не os.cpu_count()!
 # Начнем с безопасного значения. Можно будет увеличить до 16, 24, 32...
-NUM_WORKERS = 16 
+NUM_WORKERS = 32 
 
 def main():
     # torch.set_num_threads(1) -> УДАЛЕНО, так как мы управляем этим глобально.
