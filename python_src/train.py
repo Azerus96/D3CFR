@@ -159,7 +159,7 @@ def main():
                     traced_script_module = torch.jit.trace(model, example_input)
                     traced_script_module.save(TORCHSCRIPT_MODEL_PATH)
                     print("Models saved successfully.", flush=True)
-                    Опционально: можно добавить пуш в гит, если нужно
+                    #Опционально: можно добавить пуш в гит, если нужно
                     print("Pushing progress to GitHub...", flush=True)
                     os.system(f'git add {MODEL_PATH} {TORCHSCRIPT_MODEL_PATH}')
                     os.system(f'git commit -m "Training checkpoint after {total_traversals} traversals"')
