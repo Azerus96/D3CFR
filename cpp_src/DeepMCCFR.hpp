@@ -28,8 +28,8 @@ private:
     std::shared_ptr<RequestManager> request_manager_;
     size_t action_limit_;
 
-    std::map<int, float> traverse(GameState state, int traversing_player, std::vector<TrainingSample>& samples);
-    // ИЗМЕНЕНО: Сигнатура featurize теперь включает player_view
+    // ИЗМЕНЕНО: traverse теперь принимает GameState по ссылке
+    std::map<int, float> traverse(GameState& state, int traversing_player, std::vector<TrainingSample>& samples);
     std::vector<float> featurize(const GameState& state, int player_view);
 };
 
