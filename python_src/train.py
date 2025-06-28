@@ -1,4 +1,4 @@
-# D2CFR-main/python_src/train.py
+# D2CFR-main/python_src/train.py (ИСПРАВЛЕННАЯ ВЕРСИЯ)
 
 import os
 import time
@@ -10,8 +10,23 @@ import numpy as np
 import concurrent.futures
 import traceback
 
+# --- ГЛОБАЛЬНЫЙ КОНТРОЛЬ НАД ПОТОКАМИ ---
+# Это САМАЯ ВАЖНАЯ ЧАСТЬ для стабильной работы на многоядерных CPU.
+# Мы ограничиваем количество потоков, которые могут использовать
+# PyTorch, NumPy и OpenMP (в вашем C++ коде).
+# 8 - это безопасное и эффективное значение для начала.
+# Оно оставляет много ядер для параллельной работы воркеров.
+NUM_COMPUTATION_THREADS = "8"
+os.environ['OMP_NUM_THREADS'] = NUM_COMPUTATION_THREADS
+os.environ['OPENBLAS_NUM_THREADS'] = NUM_COMPUTATION_THREADS
+os.environ['MKL_NUM_THREADS'] = NUM_COMPUTATION_THREADS
+os.environ['VECLIB_MAXIMUM_THREADS'] = NUM_COMPUTATION_THREADS
+os.environ['NUMEXPR_NUM_THREADS'] = NUM_COMPUTATION_THREADS
+torch.set_num_threads(int(NUM_COMPUTATION_THREADS))
+# --- КОНЕЦ БЛОКА КОНТРОЛЯ ПОТОКОВ ---
+
+
 from .model import DuelingNetwork
-# ИЗМЕНЕНО: cleanup_shared_memory больше не нужен
 from ofc_engine import DeepMCCFR, SharedReplayBuffer
 
 # --- HYPERPARAMETERS ---
@@ -20,18 +35,20 @@ ACTION_LIMIT = 24
 LEARNING_RATE = 0.001
 REPLAY_BUFFER_CAPACITY = 2000000
 BATCH_SIZE = 2048
-TRAINING_BLOCK_SIZE = 24
+TRAINING_BLOCK_SIZE = 96 # Можно увеличить, чтобы лучше утилизировать ядра
 SAVE_INTERVAL_BLOCKS = 5 
 MODEL_PATH = "d2cfr_model.pth"
 TORCHSCRIPT_MODEL_PATH = "d2cfr_model_script.pt"
-NUM_WORKERS = 24
-# УДАЛЕНО: Имя общей памяти больше не нужно
+# Оптимальное количество воркеров - это не os.cpu_count()!
+# Начнем с безопасного значения. Можно будет увеличить до 16, 24, 32...
+NUM_WORKERS = 16 
 
 def main():
-    torch.set_num_threads(1)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # torch.set_num_threads(1) -> УДАЛЕНО, так как мы управляем этим глобально.
+    device = torch.device("cpu") # Принудительно используем CPU
     print(f"Using device for PyTorch: {device}", flush=True)
-    print(f"Using {NUM_WORKERS} worker threads for data collection on CPU.", flush=True)
+    print(f"Using {NUM_WORKERS} worker threads for data collection.", flush=True)
+    print(f"Each library (Torch, OpenMP, etc.) is limited to {NUM_COMPUTATION_THREADS} threads.", flush=True)
 
     model = DuelingNetwork(input_size=INPUT_SIZE, max_actions=ACTION_LIMIT).to(device)
     
@@ -53,40 +70,50 @@ def main():
     traced_script_module.save(TORCHSCRIPT_MODEL_PATH)
     print(f"TorchScript model saved to {TORCHSCRIPT_MODEL_PATH}", flush=True)
 
-    # --- ИЗМЕНЕНО: Создание буфера ---
     print(f"Creating in-memory replay buffer with capacity {REPLAY_BUFFER_CAPACITY}", flush=True)
-    # Теперь конструктор не принимает имя, только вместимость
     replay_buffer = SharedReplayBuffer(REPLAY_BUFFER_CAPACITY)
     print("Buffer created.", flush=True)
 
+    # Создаем пул солверов. Они все будут писать в один и тот же буфер.
     solvers = [DeepMCCFR(TORCHSCRIPT_MODEL_PATH, ACTION_LIMIT, replay_buffer) for _ in range(NUM_WORKERS)]
-    print("Solver instances created and linked to the buffer.", flush=True)
+    print(f"{len(solvers)} solver instances created and linked to the buffer.", flush=True)
 
     total_traversals = 0
     block_counter = 0
     try:
+        # Используем ThreadPoolExecutor для параллельного запуска C++ воркеров
         with concurrent.futures.ThreadPoolExecutor(max_workers=NUM_WORKERS) as executor:
             while True:
                 block_counter += 1
                 start_time = time.time()
                 
+                print(f"\n--- Block {block_counter} ---", flush=True)
                 print(f"Submitting {TRAINING_BLOCK_SIZE} traversal tasks to {NUM_WORKERS} workers...", flush=True)
                 
-                futures = [executor.submit(solvers[i % NUM_WORKERS].run_traversal) for i in range(TRAINING_BLOCK_SIZE)]
+                # Запускаем run_traversal в параллельных потоках
+                futures = [executor.submit(solver.run_traversal) for solver in solvers for _ in range(TRAINING_BLOCK_SIZE // NUM_WORKERS)]
                 
-                concurrent.futures.wait(futures)
+                # Ждем завершения всех задач по генерации данных
+                for future in concurrent.futures.as_completed(futures):
+                    # Проверяем, не было ли ошибок в воркерах
+                    if future.exception() is not None:
+                        print(f"!!! An error occurred in a worker thread: {future.exception()}", flush=True)
+                        traceback.print_exc()
 
-                total_traversals += TRAINING_BLOCK_SIZE
+                total_traversals += len(futures)
                 buffer_size = replay_buffer.get_count()
                 
                 print(f"Data collection finished. Buffer size: {buffer_size}", flush=True)
 
                 if buffer_size < BATCH_SIZE:
-                    print(f"Block {block_counter} | Total Traversals: {total_traversals} | Buffer size {buffer_size} is too small, skipping training.", flush=True)
+                    print(f"Buffer size {buffer_size} is too small, skipping training. Need {BATCH_SIZE}.", flush=True)
+                    time.sleep(5) # Ждем немного, чтобы не спамить логами
                     continue
 
+                # --- Тренировочный шаг ---
                 model.train()
                 
+                # Получаем батч из C++ буфера
                 infosets_np, targets_np = replay_buffer.sample(BATCH_SIZE)
                 
                 infosets = torch.from_numpy(infosets_np).to(device)
@@ -102,7 +129,7 @@ def main():
                 optimizer.step()
                 
                 duration = time.time() - start_time
-                traversals_per_sec = TRAINING_BLOCK_SIZE / duration if duration > 0 else float('inf')
+                traversals_per_sec = len(futures) / duration if duration > 0 else float('inf')
                 
                 print(f"Block {block_counter} | Total: {total_traversals:,} | Loss: {loss.item():.6f} | Speed: {traversals_per_sec:.2f} trav/s", flush=True)
 
@@ -123,19 +150,17 @@ def main():
 
     except KeyboardInterrupt:
         print("\nTraining interrupted. Saving final models...", flush=True)
-        torch.save(model.state_dict(), MODEL_PATH)
-        model.eval()
-        traced_script_module = torch.jit.trace(model, example_input)
-        traced_script_module.save(TORCHSCRIPT_MODEL_PATH)
-        print("Models saved. Exiting.", flush=True)
     except Exception as e:
         print(f"\nAn unexpected error occurred: {e}", flush=True)
         traceback.print_exc()
-        torch.save(model.state_dict(), "d2cfr_model_error.pth")
-        print("Saved an emergency copy of the model.", flush=True)
     finally:
-        # УДАЛЕНО: Очистка общей памяти больше не нужна.
-        print("Training finished.")
+        print("Saving final models...", flush=True)
+        torch.save(model.state_dict(), "d2cfr_model_final.pth")
+        model.eval()
+        traced_script_module = torch.jit.trace(model, example_input)
+        traced_script_module.save("d2cfr_model_script_final.pt")
+        print("Models saved. Training finished.", flush=True)
+
 
 if __name__ == "__main__":
     main()
