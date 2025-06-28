@@ -1,4 +1,4 @@
-# D2CFR-main/CMakeLists.txt
+# D2CFR-main/CMakeLists.txt (ИСПРАВЛЕННАЯ ВЕРСИЯ 2.0)
 
 cmake_minimum_required(VERSION 3.10)
 project(OFCEngine)
@@ -9,16 +9,25 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # --- Поиск зависимостей ---
 # 1. Pybind11
-find_package(pybind11 REQUIRED)
+# Мы больше не используем find_package. Вместо этого мы добавляем его как поддиректорию.
+# pybind11 будет скачан автоматически, если его нет.
+# Это самый надежный способ интеграции.
+include(FetchContent)
+FetchContent_Declare(
+  pybind11
+  GIT_REPOSITORY https://github.com/pybind/pybind11.git
+  GIT_TAG v2.13.1 # Используем конкретную, стабильную версию
+)
+FetchContent_MakeAvailable(pybind11)
+
 # 2. LibTorch (PyTorch C++ API)
 find_package(Torch REQUIRED)
+
 # 3. OpenMP для параллелизма
 find_package(OpenMP REQUIRED)
 
 # --- Собираем все исходники ---
-# Собираем все .cpp файлы из cpp_src и его подпапок
 file(GLOB_RECURSE SOURCES "cpp_src/*.cpp")
-# Добавляем главный файл-обертку
 list(APPEND SOURCES "pybind_wrapper.cpp")
 
 # --- Создание Python модуля ---
@@ -30,23 +39,14 @@ pybind11_add_module(ofc_engine SHARED ${SOURCES})
 target_link_libraries(ofc_engine PRIVATE OpenMP::OpenMP_CXX)
 
 # 2. Подключаем LibTorch
-# ${TORCH_LIBRARIES} - это переменная, которую создает find_package(Torch)
-# Она содержит все необходимые библиотеки (torch, torch_cpu, c10 и т.д.)
 target_link_libraries(ofc_engine PRIVATE ${TORCH_LIBRARIES})
 
 # --- Настройки для корректной работы ---
-# Устанавливаем флаги компиляции
 target_compile_options(ofc_engine PRIVATE -O3 -g)
 
-# Устанавливаем RPATH, чтобы модуль мог найти .so файлы LibTorch во время выполнения
 if(UNIX AND NOT APPLE)
     target_link_options(ofc_engine PRIVATE "-Wl,-rpath,${TORCH_INSTALL_PREFIX}/lib")
 endif()
-
-# --- Установка (опционально, но полезно) ---
-# Эта часть нужна, если вы захотите делать `make install`
-# Она скопирует скомпилированный .so файл в нужное место
-install(TARGETS ofc_engine DESTINATION ${CMAKE_INSTALL_PREFIX})
 
 # Выводим пути для отладки
 message(STATUS "Pybind11 include dirs: ${pybind11_INCLUDE_DIRS}")
