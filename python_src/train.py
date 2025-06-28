@@ -26,8 +26,7 @@ MODEL_PATH = "d2cfr_model.pth"
 TORCHSCRIPT_MODEL_PATH = "d2cfr_model_script.pt"
 NUM_WORKERS = 24
 # ИМЯ ДЛЯ СЕГМЕНТА ОБЩЕЙ ПАМЯТИ
-SHARED_MEMORY_NAME = "d2cfr_replay_buffer"
-
+SHARED_MEMORY_NAME = os.getenv("SHARED_MEMORY_NAME", "d2cfr_replay_buffer_default")
 def main():
     # Устанавливаем device (GPU, если доступен)
     torch.set_num_threads(1)
