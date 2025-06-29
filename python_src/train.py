@@ -25,11 +25,11 @@ from ofc_engine import DeepMCCFR, SharedReplayBuffer
 
 # --- ГИПЕРПАРАМЕТРЫ ---
 INPUT_SIZE = 1486 
-ACTION_LIMIT = 8 # Разумный компромисс для скорости и качества
+ACTION_LIMIT = 4 # Разумный компромисс для скорости и качества
 LEARNING_RATE = 0.001
 REPLAY_BUFFER_CAPACITY = 2000000
 BATCH_SIZE = 256
-TRAINING_BLOCK_SIZE = 48 # 10 задач на воркера
+TRAINING_BLOCK_SIZE = 24 # 10 задач на воркера
 SAVE_INTERVAL_BLOCKS = 5 
 MODEL_PATH = "d2cfr_model.pth"
 TORCHSCRIPT_MODEL_PATH = "d2cfr_model_script.pt"
