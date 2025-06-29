@@ -1,14 +1,11 @@
-// D2CFR-main/cpp_src/DeepMCCFR.cpp (ФИНАЛЬНЫЙ ТЕСТ)
+// D2CFR-main/cpp_src/DeepMCCFR.cpp (ФИНАЛЬНАЯ ОПТИМИЗИРОВАННАЯ ВЕРСИЯ)
 
 #include "DeepMCCFR.hpp"
-#include <pybind11/pybind11.h>
 #include <stdexcept>
 #include <iostream>
 #include <numeric>
 #include <algorithm>
 #include <torch/torch.h>
-
-namespace py = pybind11;
 
 namespace ofc {
 
@@ -24,7 +21,6 @@ DeepMCCFR::DeepMCCFR(const std::string& model_path, size_t action_limit, SharedR
 }
 
 void DeepMCCFR::run_traversal() {
-    // GIL освобождается в pybind_wrapper
     GameState state; 
     traverse(state, 0);
     state.reset(); 
@@ -32,7 +28,6 @@ void DeepMCCFR::run_traversal() {
 }
 
 std::vector<float> DeepMCCFR::featurize(const GameState& state, int player_view) {
-    // ... ваш код featurize без изменений ...
     const Board& my_board = state.get_player_board(player_view);
     const Board& opp_board = state.get_opponent_board(player_view);
     const int FEATURE_SIZE = 1486;
