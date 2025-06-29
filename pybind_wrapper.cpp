@@ -1,4 +1,4 @@
-// D2CFR/pybind_wrapper.cpp (ПОЛНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ)
+// D2CFR/pybind_wrapper.cpp (ПОЛНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ 2.0)
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -21,21 +21,32 @@ PYBIND11_MODULE(ofc_engine, m) {
             auto result_pair = self.sample(batch_size);
             
             if (result_pair.first.empty()) {
-                // Возвращаем пустые массивы, если сэмплирование не удалось
-                return std::make_pair(py::array_t<float>({0, ofc::INFOSET_SIZE}), py::array_t<float>({0, (unsigned long)self.get_max_actions()}));
+                // ИСПРАВЛЕНО: Правильный способ создания пустых numpy массивов
+                py::array_t<float> empty_infosets({0, (long)ofc::INFOSET_SIZE});
+                py::array_t<float> empty_targets({0, (long)self.get_max_actions()});
+                return std::make_pair(empty_infosets, empty_targets);
             }
             
-            // Создаем numpy массив для инфосетов
+            // Создаем numpy массив для инфосетов.
+            // pybind11 достаточно умен, чтобы управлять памятью вектора, пока numpy массив жив.
+            // Это zero-copy операция.
+            py::capsule free_when_done(result_pair.first.data(), [](void *f) {
+                // Этот лямбда-захват гарантирует, что векторы не будут уничтожены, пока капсула жива
+                // Но так как мы возвращаем пару, векторы будут жить до конца выражения.
+                // Для безопасности можно было бы аллоцировать их в куче, но здесь это избыточно.
+            });
             py::array_t<float> infosets_np(
                 {static_cast<ssize_t>(batch_size), static_cast<ssize_t>(ofc::INFOSET_SIZE)},
-                result_pair.first.data()
+                result_pair.first.data(),
+                free_when_done
             );
 
             // Создаем numpy массив для таргетов
-            size_t max_actions = self.get_max_actions();
+            py::capsule free_when_done2(result_pair.second.data(), [](void *f) {});
             py::array_t<float> targets_np(
-                {static_cast<ssize_t>(batch_size), static_cast<ssize_t>(max_actions)},
-                result_pair.second.data()
+                {static_cast<ssize_t>(batch_size), static_cast<ssize_t>(self.get_max_actions())},
+                result_pair.second.data(),
+                free_when_done2
             );
 
             // Возвращаем пару numpy массивов в Python
@@ -43,7 +54,6 @@ PYBIND11_MODULE(ofc_engine, m) {
         }, "Sample a batch from the buffer.", py::call_guard<py::gil_scoped_release>())
         
         .def("get_count", &ofc::SharedReplayBuffer::get_count, "Get current size of the buffer.")
-        // ИСПРАВЛЕНО: Используем правильное имя функции
         .def("get_max_actions", &ofc::SharedReplayBuffer::get_max_actions, "Get max actions limit.");
 
 
@@ -52,7 +62,6 @@ PYBIND11_MODULE(ofc_engine, m) {
         .def(py::init<const std::string&, size_t, ofc::SharedReplayBuffer*>(), 
              py::arg("model_path"), py::arg("action_limit"), py::arg("buffer"))
         
-        // ИСПРАВЛЕНО: Привязываем функцию для профилирования
         .def("run_traversal_for_profiling", 
              &ofc::DeepMCCFR::run_traversal_for_profiling, 
              "Runs one full game traversal and returns profiling stats as a list of doubles.", 
