@@ -13,7 +13,7 @@ import cProfile, pstats # Для профилирования
 
 # --- НАСТРОЙКИ ---
 # Используем те же оптимальные настройки, что и раньше
-NUM_COMPUTATION_THREADS = "4"
+NUM_COMPUTATION_THREADS = "8"
 os.environ['OMP_NUM_THREADS'] = NUM_COMPUTATION_THREADS
 os.environ['OPENBLAS_NUM_THREADS'] = NUM_COMPUTATION_THREADS
 os.environ['MKL_NUM_THREADS'] = NUM_COMPUTATION_THREADS
@@ -26,15 +26,15 @@ from ofc_engine import DeepMCCFR, SharedReplayBuffer
 
 # --- ГИПЕРПАРАМЕТРЫ ---
 INPUT_SIZE = 1486 
-ACTION_LIMIT = 4
+ACTION_LIMIT = 5
 LEARNING_RATE = 0.001
-REPLAY_BUFFER_CAPACITY = 2000000
-BATCH_SIZE = 1024
-TRAINING_BLOCK_SIZE = 24
+REPLAY_BUFFER_CAPACITY = 500000
+BATCH_SIZE = 256
+TRAINING_BLOCK_SIZE = 12
 SAVE_INTERVAL_BLOCKS = 5 
 MODEL_PATH = "d2cfr_model.pth"
 TORCHSCRIPT_MODEL_PATH = "d2cfr_model_script.pt"
-NUM_WORKERS = 24
+NUM_WORKERS = 12
 
 def run_training_loop():
     # Эта функция содержит основной цикл, чтобы мы могли его профилировать
