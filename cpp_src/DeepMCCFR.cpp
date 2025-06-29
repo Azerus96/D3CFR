@@ -24,22 +24,27 @@ DeepMCCFR::DeepMCCFR(const std::string& model_path, size_t action_limit, SharedR
     }
 }
 
-// ИЗМЕНЕНО: Добавлено ручное управление GIL
 std::vector<double> DeepMCCFR::run_traversal_for_profiling() {
     std::vector<double> result;
-    
-    // Создаем блок, внутри которого GIL будет освобожден
     {
-        py::gil_scoped_release release; // Освобождаем GIL здесь
-
-        // Вся тяжелая работа выполняется здесь, пока GIL освобожден
+        py::gil_scoped_release release;
+        
         ProfilingStats stats;
-        GameState state_p0;
-        traverse(state_p0, 0, stats);
-        GameState state_p1;
-        traverse(state_p1, 1, stats);
+        
+        // ИЗМЕНЕНИЕ ЗДЕСЬ: Создаем один объект GameState
+        GameState state; 
+        
+        // Первый проход
+        traverse(state, 0, stats);
+
+        // Сбрасываем состояние вместо создания нового объекта
+        state.reset(); 
+        
+        // Второй проход
+        traverse(state, 1, stats);
 
         if (stats.call_count > 0) {
+            // ... остальная часть функции без изменений ...
             result = {
                 stats.total_traverse_time.count() / stats.call_count,
                 stats.get_legal_actions_time.count() / stats.call_count,
@@ -48,8 +53,7 @@ std::vector<double> DeepMCCFR::run_traversal_for_profiling() {
                 stats.buffer_push_time.count() / stats.call_count
             };
         }
-    } // GIL автоматически захватывается обратно при выходе из блока
-
+    } 
     return result;
 }
 
