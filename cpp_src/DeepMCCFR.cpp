@@ -1,6 +1,7 @@
 // D2CFR-main/cpp_src/DeepMCCFR.cpp (ВЕРСИЯ 6.0 - MULTIPROCESSING)
 
 #include "DeepMCCFR.hpp"
+#include <pybind11/stl.h>
 #include <stdexcept>
 #include <iostream>
 #include <numeric>
