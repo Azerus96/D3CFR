@@ -1,4 +1,4 @@
-// D2CFR-main/cpp_src/DeepMCCFR.cpp (ФИНАЛЬНАЯ ВЕРСИЯ)
+// D2CFR-main/cpp_src/DeepMCCFR.cpp (ФИНАЛЬНЫЙ ТЕСТ)
 
 #include "DeepMCCFR.hpp"
 #include <pybind11/pybind11.h>
@@ -7,7 +7,6 @@
 #include <numeric>
 #include <algorithm>
 #include <torch/torch.h>
-#include <chrono>
 
 namespace py = pybind11;
 
@@ -24,32 +23,16 @@ DeepMCCFR::DeepMCCFR(const std::string& model_path, size_t action_limit, SharedR
     }
 }
 
-std::vector<double> DeepMCCFR::run_traversal_for_profiling() {
-    std::vector<double> result;
-    {
-        py::gil_scoped_release release;
-        
-        ProfilingStats stats;
-        GameState state; 
-        
-        traverse(state, 0, stats);
-        state.reset(); 
-        traverse(state, 1, stats);
-
-        if (stats.call_count > 0) {
-            result = {
-                stats.total_traverse_time.count() / stats.call_count,
-                stats.get_legal_actions_time.count() / stats.call_count,
-                stats.featurize_time.count() / stats.call_count,
-                stats.model_inference_time.count() / stats.call_count,
-                stats.buffer_push_time.count() / stats.call_count
-            };
-        }
-    } 
-    return result;
+void DeepMCCFR::run_traversal() {
+    // GIL освобождается в pybind_wrapper
+    GameState state; 
+    traverse(state, 0);
+    state.reset(); 
+    traverse(state, 1);
 }
 
 std::vector<float> DeepMCCFR::featurize(const GameState& state, int player_view) {
+    // ... ваш код featurize без изменений ...
     const Board& my_board = state.get_player_board(player_view);
     const Board& opp_board = state.get_opponent_board(player_view);
     const int FEATURE_SIZE = 1486;
@@ -91,9 +74,7 @@ std::vector<float> DeepMCCFR::featurize(const GameState& state, int player_view)
     return features;
 }
 
-std::map<int, float> DeepMCCFR::traverse(GameState& state, int traversing_player, ProfilingStats& stats) {
-    auto t_start_total = std::chrono::high_resolution_clock::now();
-
+std::map<int, float> DeepMCCFR::traverse(GameState& state, int traversing_player) {
     if (state.is_terminal()) {
         auto payoffs = state.get_payoffs(evaluator_);
         return {{0, payoffs.first}, {1, payoffs.second}};
@@ -101,18 +82,15 @@ std::map<int, float> DeepMCCFR::traverse(GameState& state, int traversing_player
 
     int current_player = state.get_current_player();
     
-    auto t_start_actions = std::chrono::high_resolution_clock::now();
     std::vector<Action> legal_actions;
     state.get_legal_actions(action_limit_, legal_actions);
-    auto t_end_actions = std::chrono::high_resolution_clock::now();
-    stats.get_legal_actions_time += (t_end_actions - t_start_actions);
-
+    
     int num_actions = legal_actions.size();
     UndoInfo undo_info;
 
     if (num_actions == 0) {
         state.apply_action({{}, INVALID_CARD}, traversing_player, undo_info);
-        auto result = traverse(state, traversing_player, stats);
+        auto result = traverse(state, traversing_player);
         state.undo_action(undo_info, traversing_player);
         return result;
     }
@@ -120,19 +98,15 @@ std::map<int, float> DeepMCCFR::traverse(GameState& state, int traversing_player
     if (current_player != traversing_player) {
         int action_idx = state.get_rng()() % num_actions;
         state.apply_action(legal_actions[action_idx], traversing_player, undo_info);
-        auto result = traverse(state, traversing_player, stats);
+        auto result = traverse(state, traversing_player);
         state.undo_action(undo_info, traversing_player);
         return result;
     }
 
-    auto t_start_featurize = std::chrono::high_resolution_clock::now();
     std::vector<float> infoset_vec = featurize(state, traversing_player);
-    auto t_end_featurize = std::chrono::high_resolution_clock::now();
-    stats.featurize_time += (t_end_featurize - t_start_featurize);
     
     std::vector<float> regrets;
     {
-        auto t_start_inference = std::chrono::high_resolution_clock::now();
         torch::NoGradGuard no_grad;
         auto options = torch::TensorOptions().dtype(torch::kFloat32);
         torch::Tensor input_tensor = torch::from_blob(infoset_vec.data(), {1, (long)infoset_vec.size()}, options).to(device_);
@@ -140,8 +114,6 @@ std::map<int, float> DeepMCCFR::traverse(GameState& state, int traversing_player
         inputs.push_back(input_tensor);
         at::Tensor output_tensor = model_.forward(inputs).toTensor();
         regrets.assign(output_tensor.data_ptr<float>(), output_tensor.data_ptr<float>() + num_actions);
-        auto t_end_inference = std::chrono::high_resolution_clock::now();
-        stats.model_inference_time += (t_end_inference - t_start_inference);
     }
 
     std::vector<float> strategy(num_actions);
@@ -162,7 +134,7 @@ std::map<int, float> DeepMCCFR::traverse(GameState& state, int traversing_player
 
     for (int i = 0; i < num_actions; ++i) {
         state.apply_action(legal_actions[i], traversing_player, undo_info);
-        action_utils[i] = traverse(state, traversing_player, stats);
+        action_utils[i] = traverse(state, traversing_player);
         state.undo_action(undo_info, traversing_player);
 
         for(auto const& [player_idx, util] : action_utils[i]) {
@@ -175,16 +147,9 @@ std::map<int, float> DeepMCCFR::traverse(GameState& state, int traversing_player
         true_regrets[i] = action_utils[i][current_player] - node_util[current_player];
     }
     
-    auto t_start_push = std::chrono::high_resolution_clock::now();
     replay_buffer_->push(infoset_vec, true_regrets, num_actions);
-    auto t_end_push = std::chrono::high_resolution_clock::now();
-    stats.buffer_push_time += (t_end_push - t_start_push);
-
-    auto t_end_total = std::chrono::high_resolution_clock::now();
-    stats.total_traverse_time += (t_end_total - t_start_total);
-    stats.call_count++;
 
     return node_util;
 }
 
-} // namespace ofc
+}
