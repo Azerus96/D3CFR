@@ -13,13 +13,13 @@ import cProfile, pstats # Для профилирования
 
 # --- НАСТРОЙКИ ---
 # Используем те же оптимальные настройки, что и раньше
-NUM_COMPUTATION_THREADS = "8"
-os.environ['OMP_NUM_THREADS'] = NUM_COMPUTATION_THREADS
-os.environ['OPENBLAS_NUM_THREADS'] = NUM_COMPUTATION_THREADS
-os.environ['MKL_NUM_THREADS'] = NUM_COMPUTATION_THREADS
-os.environ['VECLIB_MAXIMUM_THREADS'] = NUM_COMPUTATION_THREADS
-os.environ['NUMEXPR_NUM_THREADS'] = NUM_COMPUTATION_THREADS
-torch.set_num_threads(int(NUM_COMPUTATION_THREADS))
+
+os.environ['OMP_NUM_THREADS'] = 1
+os.environ['OPENBLAS_NUM_THREADS'] = 1
+os.environ['MKL_NUM_THREADS'] = 1
+os.environ['VECLIB_MAXIMUM_THREADS'] = 1
+os.environ['NUMEXPR_NUM_THREADS'] = 1
+torch.set_num_threads(int(1))
 
 from .model import DuelingNetwork
 from ofc_engine import DeepMCCFR, SharedReplayBuffer
@@ -30,11 +30,11 @@ ACTION_LIMIT = 5
 LEARNING_RATE = 0.001
 REPLAY_BUFFER_CAPACITY = 500000
 BATCH_SIZE = 256
-TRAINING_BLOCK_SIZE = 12
+TRAINING_BLOCK_SIZE = 48
 SAVE_INTERVAL_BLOCKS = 5 
 MODEL_PATH = "d2cfr_model.pth"
 TORCHSCRIPT_MODEL_PATH = "d2cfr_model_script.pt"
-NUM_WORKERS = 12
+NUM_WORKERS = 48
 
 def run_training_loop():
     # Эта функция содержит основной цикл, чтобы мы могли его профилировать
