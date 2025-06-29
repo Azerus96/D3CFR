@@ -1,4 +1,4 @@
-// D2CFR-main/cpp_src/DeepMCCFR.hpp
+// D2CFR-main/cpp_src/DeepMCCFR.hpp (ПОЛНАЯ ВЕРСИЯ ДЛЯ ЭТАПА 2)
 
 #pragma once
 #include "game_state.hpp"
@@ -9,10 +9,11 @@
 #include <map>
 #include <memory>
 #include <thread>
+#include <chrono>
 
 namespace ofc {
 
-// Структура для сбора статистики. Теперь это просто контейнер данных.
+// Структура для сбора статистики остается той же
 struct ProfilingStats {
     std::chrono::duration<double, std::milli> total_traverse_time{0};
     std::chrono::duration<double, std::milli> get_legal_actions_time{0};
@@ -27,7 +28,6 @@ class DeepMCCFR {
 public:
     DeepMCCFR(const std::string& model_path, size_t action_limit, SharedReplayBuffer* buffer);
     
-    // Изменено: теперь возвращает вектор с результатами
     std::vector<double> run_traversal_for_profiling();
 
 private:
@@ -37,7 +37,7 @@ private:
     SharedReplayBuffer* replay_buffer_; 
     size_t action_limit_;
 
-    // Изменено: traverse теперь принимает ProfilingStats по ссылке
+    // УЛУЧШЕНО: traverse теперь принимает ProfilingStats по ссылке
     std::map<int, float> traverse(GameState& state, int traversing_player, ProfilingStats& stats);
     std::vector<float> featurize(const GameState& state, int player_view);
 };
