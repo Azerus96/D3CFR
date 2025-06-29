@@ -1,4 +1,4 @@
-# D2CFR-main/python_src/train.py (ВЕРСИЯ ДЛЯ ПРОФИЛИРОВАНИЯ)
+# D2CFR-main/python_src/train.py (ИСПРАВЛЕННАЯ ВЕРСИЯ ДЛЯ РЕШАЮЩЕГО ТЕСТА)
 
 import os
 import time
@@ -9,42 +9,42 @@ from torch.nn.utils import clip_grad_norm_
 import numpy as np
 import concurrent.futures
 import traceback
-import cProfile, pstats # Для профилирования
+import cProfile, pstats
 
-# --- НАСТРОЙКИ ---
-# Используем те же оптимальные настройки, что и раньше
-
-os.environ['OMP_NUM_THREADS'] = "1"
-os.environ['OPENBLAS_NUM_THREADS'] = "1"
-os.environ['MKL_NUM_THREADS'] = "1"
-os.environ['VECLIB_MAXIMUM_THREADS'] = "1"
-os.environ['NUMEXPR_NUM_THREADS'] = "1"
-torch.set_num_threads(int("1"))
+# --- НАСТРОЙКИ ДЛЯ ТЕСТА "МАКСИМАЛЬНОЙ ИЗОЛЯЦИИ" ---
+# Мы хотим понять, как работает сам алгоритм, исключив влияние многопоточности.
+# Поэтому каждый из 48 воркеров будет строго однопоточным.
+NUM_COMPUTATION_THREADS = "1"
+os.environ['OMP_NUM_THREADS'] = NUM_COMPUTATION_THREADS
+os.environ['OPENBLAS_NUM_THREADS'] = NUM_COMPUTATION_THREADS
+os.environ['MKL_NUM_THREADS'] = NUM_COMPUTATION_THREADS
+os.environ['VECLIB_MAXIMUM_THREADS'] = NUM_COMPUTATION_THREADS
+os.environ['NUMEXPR_NUM_THREADS'] = NUM_COMPUTATION_THREADS
+torch.set_num_threads(int(NUM_COMPUTATION_THREADS))
 
 from .model import DuelingNetwork
 from ofc_engine import DeepMCCFR, SharedReplayBuffer
 
-# --- ГИПЕРПАРАМЕТРЫ ---
+# --- ГИПЕРПАРАМЕТРЫ ДЛЯ БЫСТРОГО ТЕСТА ---
+# Цель - заставить C++ код выполниться и выдать логи профилирования.
 INPUT_SIZE = 1486 
-ACTION_LIMIT = 5
+ACTION_LIMIT = 4  # <-- КРИТИЧЕСКИ ВАЖНО: Минимальное значение для ускорения C++
 LEARNING_RATE = 0.001
 REPLAY_BUFFER_CAPACITY = 500000
 BATCH_SIZE = 256
-TRAINING_BLOCK_SIZE = 48
+TRAINING_BLOCK_SIZE = 48 # <-- Даем каждому воркеру ровно 1 задачу (48/48=1)
 SAVE_INTERVAL_BLOCKS = 5 
 MODEL_PATH = "d2cfr_model.pth"
 TORCHSCRIPT_MODEL_PATH = "d2cfr_model_script.pt"
-NUM_WORKERS = 48
+NUM_WORKERS = 48 # <-- Используем вашу идею с большим количеством воркеров
 
 def run_training_loop():
-    # Эта функция содержит основной цикл, чтобы мы могли его профилировать
     device = torch.device("cpu")
     print(f"Using device for PyTorch: {device}", flush=True)
     print(f"Using {NUM_WORKERS} worker threads for data collection.", flush=True)
     print(f"Each library (Torch, OpenMP, etc.) is limited to {NUM_COMPUTATION_THREADS} threads.", flush=True)
 
     model = DuelingNetwork(input_size=INPUT_SIZE, max_actions=ACTION_LIMIT).to(device)
-    # ... (здесь могла бы быть логика загрузки, но для чистоты профилирования начнем с нуля)
     print("Starting training from scratch for this profiling run.", flush=True)
 
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
@@ -65,14 +65,14 @@ def run_training_loop():
     print(f"{len(solvers)} solver instances created and linked to the buffer.", flush=True)
 
     total_traversals = 0
-    # ОГРАНИЧИМ КОЛИЧЕСТВО БЛОКОВ ДЛЯ ПРОФИЛИРОВАНИЯ
-    for block_counter in range(1, 3): # Запустим всего 2 блока для сбора статистики
+    # Запустим всего 2 блока для сбора статистики
+    for block_counter in range(1, 3):
         start_time = time.time()
         
         print(f"\n--- Block {block_counter} ---", flush=True)
         
         tasks_per_worker = TRAINING_BLOCK_SIZE // NUM_WORKERS
-        print(f"Submitting {tasks_per_worker * NUM_WORKERS} traversal tasks...", flush=True)
+        print(f"Submitting {tasks_per_worker * NUM_WORKERS} traversal tasks ({tasks_per_worker} each)...", flush=True)
         
         with concurrent.futures.ThreadPoolExecutor(max_workers=NUM_WORKERS) as executor:
             futures = [executor.submit(solver.run_traversal) for solver in solvers for _ in range(tasks_per_worker)]
@@ -118,8 +118,6 @@ def main():
         print("\n" + "="*40)
         print("PYTHON PROFILING RESULTS (CUMULATIVE TIME)")
         print("="*40)
-        # Сортируем по 'cumulative' (общее время, включая под-функции)
-        # и выводим 20 самых "тяжелых" функций
         stats = pstats.Stats(profiler).sort_stats('cumulative')
         stats.print_stats(20)
         print("="*40)
