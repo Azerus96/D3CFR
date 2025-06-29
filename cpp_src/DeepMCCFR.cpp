@@ -1,7 +1,7 @@
-// D2CFR-main/cpp_src/DeepMCCFR.cpp (ИСПРАВЛЕННАЯ ВЕРСИЯ)
+// D2CFR-main/cpp_src/DeepMCCFR.cpp (ПОЛНАЯ ВЕРСИЯ ДЛЯ ЭТАПА 2)
 
 #include "DeepMCCFR.hpp"
-#include <pybind11/pybind11.h> // <-- ВАЖНО: ДОБАВИТЬ ЭТОТ ИНКЛЮД
+#include <pybind11/pybind11.h>
 #include <stdexcept>
 #include <iostream>
 #include <numeric>
@@ -9,7 +9,7 @@
 #include <torch/torch.h>
 #include <chrono>
 
-namespace py = pybind11; // Добавляем псевдоним для удобства
+namespace py = pybind11;
 
 namespace ofc {
 
@@ -30,21 +30,13 @@ std::vector<double> DeepMCCFR::run_traversal_for_profiling() {
         py::gil_scoped_release release;
         
         ProfilingStats stats;
-        
-        // ИЗМЕНЕНИЕ ЗДЕСЬ: Создаем один объект GameState
         GameState state; 
         
-        // Первый проход
         traverse(state, 0, stats);
-
-        // Сбрасываем состояние вместо создания нового объекта
         state.reset(); 
-        
-        // Второй проход
         traverse(state, 1, stats);
 
         if (stats.call_count > 0) {
-            // ... остальная часть функции без изменений ...
             result = {
                 stats.total_traverse_time.count() / stats.call_count,
                 stats.get_legal_actions_time.count() / stats.call_count,
@@ -57,9 +49,7 @@ std::vector<double> DeepMCCFR::run_traversal_for_profiling() {
     return result;
 }
 
-// featurize остается без изменений
 std::vector<float> DeepMCCFR::featurize(const GameState& state, int player_view) {
-    // ... ваш код featurize без изменений ...
     const Board& my_board = state.get_player_board(player_view);
     const Board& opp_board = state.get_opponent_board(player_view);
     const int FEATURE_SIZE = 1486;
@@ -101,9 +91,8 @@ std::vector<float> DeepMCCFR::featurize(const GameState& state, int player_view)
     return features;
 }
 
-// traverse остается без изменений
+// УЛУЧШЕНО: traverse теперь работает с новым API GameState
 std::map<int, float> DeepMCCFR::traverse(GameState& state, int traversing_player, ProfilingStats& stats) {
-    // ... ваш код traverse без изменений ...
     auto t_start_total = std::chrono::high_resolution_clock::now();
 
     if (state.is_terminal()) {
@@ -114,14 +103,19 @@ std::map<int, float> DeepMCCFR::traverse(GameState& state, int traversing_player
     int current_player = state.get_current_player();
     
     auto t_start_actions = std::chrono::high_resolution_clock::now();
-    auto legal_actions = state.get_legal_actions(action_limit_);
+    // УЛУЧШЕНО: Переиспользование вектора для legal_actions
+    std::vector<Action> legal_actions;
+    state.get_legal_actions(action_limit_, legal_actions);
     auto t_end_actions = std::chrono::high_resolution_clock::now();
     stats.get_legal_actions_time += (t_end_actions - t_start_actions);
 
     int num_actions = legal_actions.size();
 
+    // УЛУЧШЕНО: Переиспользование объекта UndoInfo
+    UndoInfo undo_info;
+
     if (num_actions == 0) {
-        UndoInfo undo_info = state.apply_action({{}, INVALID_CARD}, traversing_player);
+        state.apply_action({{}, INVALID_CARD}, traversing_player, undo_info);
         auto result = traverse(state, traversing_player, stats);
         state.undo_action(undo_info, traversing_player);
         return result;
@@ -129,7 +123,7 @@ std::map<int, float> DeepMCCFR::traverse(GameState& state, int traversing_player
 
     if (current_player != traversing_player) {
         int action_idx = state.get_rng()() % num_actions;
-        UndoInfo undo_info = state.apply_action(legal_actions[action_idx], traversing_player);
+        state.apply_action(legal_actions[action_idx], traversing_player, undo_info);
         auto result = traverse(state, traversing_player, stats);
         state.undo_action(undo_info, traversing_player);
         return result;
@@ -171,7 +165,7 @@ std::map<int, float> DeepMCCFR::traverse(GameState& state, int traversing_player
     std::map<int, float> node_util = {{0, 0.0f}, {1, 0.0f}};
 
     for (int i = 0; i < num_actions; ++i) {
-        UndoInfo undo_info = state.apply_action(legal_actions[i], traversing_player);
+        state.apply_action(legal_actions[i], traversing_player, undo_info);
         action_utils[i] = traverse(state, traversing_player, stats);
         state.undo_action(undo_info, traversing_player);
 
