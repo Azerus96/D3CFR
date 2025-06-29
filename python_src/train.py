@@ -120,8 +120,9 @@ def run_training_loop():
         train_start_time = time.time()
         model.train()
         infosets_np, targets_np = replay_buffer.sample(BATCH_SIZE)
-        infosets = torch.from_numpy(infosets_np).to(device)
-        targets = torch.from_numpy(targets_np).to(device)
+        # .clone() гарантирует, что мы работаем с копией данных в памяти PyTorch
+        infosets = torch.from_numpy(infosets_np).clone().to(device)
+        targets = torch.from_numpy(targets_np).clone().to(device)
 
         optimizer.zero_grad()
         predictions = model(infosets)
