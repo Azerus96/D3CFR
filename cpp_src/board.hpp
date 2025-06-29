@@ -1,5 +1,6 @@
-// D2CFR-main/cpp_src/board.hpp (ФИНАЛЬНАЯ ВЕРСИЯ)
-
+// D2CFR-main/cpp_src/board.hpp (ОРИГИНАЛЬНАЯ ВЕРСИЯ ИЗ ВАШЕГО АРХИВА)
+// Просто используйте тот файл, который был у вас до всех экспериментов.
+// Я привожу его здесь для полноты.
 #pragma once
 #include "card.hpp"
 #include "hand_evaluator.hpp"
@@ -22,70 +23,80 @@ namespace ofc {
             bottom.fill(INVALID_CARD);
         }
 
-        inline void get_row_cards(const std::string& row_name, CardSet& out_cards) const {
-            out_cards.clear();
-            if (row_name == "top") {
-                for(Card c : top) if (c != INVALID_CARD) out_cards.push_back(c);
-            } else if (row_name == "middle") {
-                for(Card c : middle) if (c != INVALID_CARD) out_cards.push_back(c);
-            } else if (row_name == "bottom") {
-                for(Card c : bottom) if (c != INVALID_CARD) out_cards.push_back(c);
-            }
+        inline CardSet get_row_cards(const std::string& row_name) const {
+            CardSet cards;
+            if (row_name == "top") for(Card c : top) if (c != INVALID_CARD) cards.push_back(c);
+            else if (row_name == "middle") for(Card c : middle) if (c != INVALID_CARD) cards.push_back(c);
+            else if (row_name == "bottom") for(Card c : bottom) if (c != INVALID_CARD) cards.push_back(c);
+            return cards;
+        }
+
+        inline CardSet get_all_cards() const {
+            CardSet all_cards;
+            all_cards.reserve(13);
+            for(Card c : top) if (c != INVALID_CARD) all_cards.push_back(c);
+            for(Card c : middle) if (c != INVALID_CARD) all_cards.push_back(c);
+            for(Card c : bottom) if (c != INVALID_CARD) all_cards.push_back(c);
+            return all_cards;
         }
 
         inline int get_card_count() const {
-            int count = 0;
-            for(Card c : top) if (c != INVALID_CARD) count++;
-            for(Card c : middle) if (c != INVALID_CARD) count++;
-            for(Card c : bottom) if (c != INVALID_CARD) count++;
-            return count;
+            return get_all_cards().size();
         }
 
-        inline bool is_foul(const HandEvaluator& evaluator, CardSet& top_cards_buf, CardSet& mid_cards_buf, CardSet& bot_cards_buf) const {
+        inline bool is_foul(const HandEvaluator& evaluator) const {
             if (get_card_count() != 13) return false;
             
-            get_row_cards("top", top_cards_buf);
-            get_row_cards("middle", mid_cards_buf);
-            get_row_cards("bottom", bot_cards_buf);
+            CardSet top_cards = get_row_cards("top");
+            CardSet mid_cards = get_row_cards("middle");
+            CardSet bot_cards = get_row_cards("bottom");
 
-            HandRank top_rank = evaluator.evaluate(top_cards_buf);
-            HandRank mid_rank = evaluator.evaluate(mid_cards_buf);
-            HandRank bot_rank = evaluator.evaluate(bot_cards_buf);
+            HandRank top_rank = evaluator.evaluate(top_cards);
+            HandRank mid_rank = evaluator.evaluate(mid_cards);
+            HandRank bot_rank = evaluator.evaluate(bot_cards);
             return (mid_rank < bot_rank) || (top_rank < mid_rank);
         }
 
-        inline int get_total_royalty(const HandEvaluator& evaluator, CardSet& top_cards_buf, CardSet& mid_cards_buf, CardSet& bot_cards_buf) const {
-            if (is_foul(evaluator, top_cards_buf, mid_cards_buf, bot_cards_buf)) return 0;
+        inline int get_total_royalty(const HandEvaluator& evaluator) const {
+            if (is_foul(evaluator)) return 0;
 
-            return evaluator.get_royalty(top_cards_buf, "top") +
-                   evaluator.get_royalty(mid_cards_buf, "middle") +
-                   evaluator.get_royalty(bot_cards_buf, "bottom");
+            CardSet top_cards = get_row_cards("top");
+            CardSet mid_cards = get_row_cards("middle");
+            CardSet bot_cards = get_row_cards("bottom");
+
+            return evaluator.get_royalty(top_cards, "top") +
+                   evaluator.get_royalty(mid_cards, "middle") +
+                   evaluator.get_royalty(bot_cards, "bottom");
         }
 
-        inline bool qualifies_for_fantasyland(const HandEvaluator& evaluator, CardSet& top_cards_buf, CardSet& mid_cards_buf, CardSet& bot_cards_buf) const {
-            if (is_foul(evaluator, top_cards_buf, mid_cards_buf, bot_cards_buf)) return false;
+        inline bool qualifies_for_fantasyland(const HandEvaluator& evaluator) const {
+            if (is_foul(evaluator)) return false;
             
-            if (top_cards_buf.size() != 3) return false;
-            HandRank hr = evaluator.evaluate(top_cards_buf);
+            CardSet top_cards = get_row_cards("top");
+
+            if (top_cards.size() != 3) return false;
+            HandRank hr = evaluator.evaluate(top_cards);
             if (hr.type_str == "Pair") {
-                int r0 = get_rank(top_cards_buf[0]), r1 = get_rank(top_cards_buf[1]), r2 = get_rank(top_cards_buf[2]);
+                int r0 = get_rank(top_cards[0]), r1 = get_rank(top_cards[1]), r2 = get_rank(top_cards[2]);
                 int pair_rank = (r0 == r1 || r0 == r2) ? r0 : r1;
-                return pair_rank >= 10;
+                return pair_rank >= 10; // Ранг 10 - это Дама (Q)
             }
             return hr.type_str == "Trips";
         }
 
-        inline int get_fantasyland_card_count(const HandEvaluator& evaluator, CardSet& top_cards_buf, CardSet& mid_cards_buf, CardSet& bot_cards_buf) const {
-            if (!qualifies_for_fantasyland(evaluator, top_cards_buf, mid_cards_buf, bot_cards_buf)) return 0;
+        inline int get_fantasyland_card_count(const HandEvaluator& evaluator) const {
+            if (!qualifies_for_fantasyland(evaluator)) return 0;
             
-            HandRank hr = evaluator.evaluate(top_cards_buf);
+            CardSet top_cards = get_row_cards("top");
+
+            HandRank hr = evaluator.evaluate(top_cards);
             if (hr.type_str == "Trips") return 17;
             if (hr.type_str == "Pair") {
-                int r0 = get_rank(top_cards_buf[0]), r1 = get_rank(top_cards_buf[1]), r2 = get_rank(top_cards_buf[2]);
+                int r0 = get_rank(top_cards[0]), r1 = get_rank(top_cards[1]), r2 = get_rank(top_cards[2]);
                 int pair_rank = (r0 == r1 || r0 == r2) ? r0 : r1;
-                if (pair_rank == 10) return 14;
-                if (pair_rank == 11) return 15;
-                if (pair_rank == 12) return 16;
+                if (pair_rank == 10) return 14; // QQ
+                if (pair_rank == 11) return 15; // KK
+                if (pair_rank == 12) return 16; // AA
             }
             return 0;
         }
