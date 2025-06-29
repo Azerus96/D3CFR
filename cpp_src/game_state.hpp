@@ -47,6 +47,9 @@ namespace ofc {
         int get_opponent_discard_count(int player_idx) const { return opponent_discard_counts_[player_idx]; }
         int get_dealer_pos() const { return dealer_pos_; }
         std::mt19937& get_rng() { return rng_; }
+        public:
+        // ... другие ваши public методы ...
+        void reset(int dealer_pos = -1);
 
     private:
         void deal_cards();
