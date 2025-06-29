@@ -1,4 +1,4 @@
-// D2CFR-main/cpp_src/DeepMCCFR.cpp (ВЕРСИЯ 5.0)
+// D2CFR-main/cpp_src/DeepMCCFR.cpp (ВЕРСИЯ 6.0 - MULTIPROCESSING)
 
 #include "DeepMCCFR.hpp"
 #include <stdexcept>
@@ -7,10 +7,12 @@
 #include <algorithm>
 #include <torch/torch.h>
 
+namespace py = pybind11;
+
 namespace ofc {
 
-DeepMCCFR::DeepMCCFR(const std::string& model_path, size_t action_limit, SharedReplayBuffer* buffer) 
-    : action_limit_(action_limit), device_(torch::kCPU), replay_buffer_(buffer) {
+DeepMCCFR::DeepMCCFR(const std::string& model_path, size_t action_limit, py::object queue) 
+    : action_limit_(action_limit), device_(torch::kCPU), queue_(queue) {
     try {
         model_ = torch::jit::load(model_path);
         model_.eval();
@@ -18,6 +20,11 @@ DeepMCCFR::DeepMCCFR(const std::string& model_path, size_t action_limit, SharedR
     } catch (const c10::Error& e) {
         throw std::runtime_error("Failed to load LibTorch model: " + std::string(e.what()));
     }
+}
+
+void DeepMCCFR::push_to_queue(const std::vector<float>& infoset, const std::vector<float>& regrets, int num_actions) {
+    py::gil_scoped_acquire acquire;
+    queue_.attr("put")(py::make_tuple(infoset, regrets, num_actions));
 }
 
 void DeepMCCFR::run_traversal() {
@@ -142,7 +149,7 @@ std::map<int, float> DeepMCCFR::traverse(GameState& state, int traversing_player
         true_regrets[i] = action_utils[i][current_player] - node_util[current_player];
     }
     
-    replay_buffer_->push(infoset_vec, true_regrets, num_actions);
+    push_to_queue(infoset_vec, true_regrets, num_actions);
 
     return node_util;
 }
