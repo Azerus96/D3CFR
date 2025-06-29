@@ -1,3 +1,5 @@
+// D2CFR-main/cpp_src/game_state.cpp (ПОЛНАЯ ВЕРСИЯ ДЛЯ ЭТАПА 1)
+
 #include "game_state.hpp"
 
 namespace ofc {
@@ -23,11 +25,8 @@ namespace ofc {
         deal_cards();
     }
 
-// ... после конструктора GameState::GameState(...) ...
-
     void GameState::reset(int dealer_pos) {
         street_ = 1;
-        // Сбрасываем доски в начальное состояние
         for (auto& board : boards_) {
             board.top.fill(INVALID_CARD);
             board.middle.fill(INVALID_CARD);
@@ -58,33 +57,31 @@ namespace ofc {
         const int SCOOP_BONUS = 3;
         const Board& p1_board = boards_[0];
         const Board& p2_board = boards_[1];
-        bool p1_foul = p1_board.is_foul(evaluator);
-        bool p2_foul = p2_board.is_foul(evaluator);
-        int p1_royalty = p1_foul ? 0 : p1_board.get_total_royalty(evaluator);
-        int p2_royalty = p2_foul ? 0 : p2_board.get_total_royalty(evaluator);
+
+        // УЛУЧШЕНО: Используем заранее созданные буферы для карт, которые являются членами класса
+        bool p1_foul = p1_board.is_foul(evaluator, p1_top_buf, p1_mid_buf, p1_bot_buf);
+        bool p2_foul = p2_board.is_foul(evaluator, p2_top_buf, p2_mid_buf, p2_bot_buf);
+        
+        int p1_royalty = p1_foul ? 0 : evaluator.get_royalty(p1_top_buf, "top") + evaluator.get_royalty(p1_mid_buf, "middle") + evaluator.get_royalty(p1_bot_buf, "bottom");
+        int p2_royalty = p2_foul ? 0 : evaluator.get_royalty(p2_top_buf, "top") + evaluator.get_royalty(p2_mid_buf, "middle") + evaluator.get_royalty(p2_bot_buf, "bottom");
 
         if (p1_foul && p2_foul) return {0.0f, 0.0f};
         if (p1_foul) return {-(float)(SCOOP_BONUS + p2_royalty), (float)(SCOOP_BONUS + p2_royalty)};
         if (p2_foul) return {(float)(SCOOP_BONUS + p1_royalty), -(float)(SCOOP_BONUS + p1_royalty)};
 
         int line_score = 0;
-        CardSet p1_top, p1_mid, p1_bot, p2_top, p2_mid, p2_bot;
-        p1_board.get_row_cards("top", p1_top);
-        p1_board.get_row_cards("middle", p1_mid);
-        p1_board.get_row_cards("bottom", p1_bot);
-        p2_board.get_row_cards("top", p2_top);
-        p2_board.get_row_cards("middle", p2_mid);
-        p2_board.get_row_cards("bottom", p2_bot);
-
-        if (evaluator.evaluate(p1_top) < evaluator.evaluate(p2_top)) line_score++; else line_score--;
-        if (evaluator.evaluate(p1_mid) < evaluator.evaluate(p2_mid)) line_score++; else line_score--;
-        if (evaluator.evaluate(p1_bot) < evaluator.evaluate(p2_bot)) line_score++; else line_score--;
+        // Векторы-буферы уже заполнены вызовами is_foul
+        if (evaluator.evaluate(p1_top_buf) < evaluator.evaluate(p2_top_buf)) line_score++; else line_score--;
+        if (evaluator.evaluate(p1_mid_buf) < evaluator.evaluate(p2_mid_buf)) line_score++; else line_score--;
+        if (evaluator.evaluate(p1_bot_buf) < evaluator.evaluate(p2_bot_buf)) line_score++; else line_score--;
 
         if (abs(line_score) == 3) line_score = (line_score > 0) ? SCOOP_BONUS : -SCOOP_BONUS;
         float p1_total = (float)(line_score + p1_royalty - p2_royalty);
         return {p1_total, -p1_total};
     }
 
+    // Остальные функции (get_legal_actions, apply_action, undo_action, etc.) остаются без изменений на этом этапе
+    // ... (вставьте сюда ваш существующий код для этих функций) ...
     std::vector<Action> GameState::get_legal_actions(size_t action_limit) const {
         std::vector<Action> actions;
         if (is_terminal()) return actions;
@@ -113,7 +110,6 @@ namespace ofc {
         return actions;
     }
 
-    // ИЗМЕНЕНО: Реализация apply_action
     UndoInfo GameState::apply_action(const Action& action, int player_view) {
         UndoInfo undo_info;
         undo_info.action = action;
@@ -149,20 +145,16 @@ namespace ofc {
         return undo_info;
     }
 
-    // ИЗМЕНЕНО: Реализация undo_action
     void GameState::undo_action(const UndoInfo& undo_info, int player_view) {
-        // Восстанавливаем состояние до действия
         street_ = undo_info.prev_street;
         current_player_ = undo_info.prev_current_player;
 
-        // Восстанавливаем колоду и розданные карты
         deck_.insert(deck_.end(), dealt_cards_.begin(), dealt_cards_.end());
         dealt_cards_ = undo_info.prev_dealt_cards;
 
         const auto& placements = undo_info.action.first;
         const Card& discarded_card = undo_info.action.second;
 
-        // Убираем карты с доски
         for (const auto& p : placements) {
             const std::string& row = p.second.first;
             int idx = p.second.second;
@@ -171,7 +163,6 @@ namespace ofc {
             else if (row == "bottom") boards_[current_player_].bottom[idx] = INVALID_CARD;
         }
 
-        // Откатываем сброс
         if (discarded_card != INVALID_CARD) {
             if (current_player_ == player_view) {
                 my_discards_[current_player_].pop_back();
