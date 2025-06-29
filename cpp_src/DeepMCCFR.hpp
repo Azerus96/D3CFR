@@ -38,14 +38,6 @@ private:
 
     std::map<int, float> traverse(GameState& state, int traversing_player, ProfilingStats& stats);
     std::vector<float> featurize(const GameState& state, int player_view);
-
-    // Буферы для переиспользования внутри traverse
-    std::vector<Action> legal_actions_buffer_;
-    std::vector<float> infoset_vec_buffer_;
-    std::vector<float> regrets_buffer_;
-    std::vector<float> strategy_buffer_;
-    std::vector<float> true_regrets_buffer_;
-    std::vector<std::map<int, float>> action_utils_buffer_;
 };
 
 } // namespace ofc
