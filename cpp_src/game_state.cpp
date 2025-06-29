@@ -1,4 +1,4 @@
-// D2CFR-main/cpp_src/game_state.cpp (ФИНАЛЬНАЯ ОПТИМИЗИРОВАННАЯ ВЕРСИЯ)
+// D2CFR-main/cpp_src/game_state.cpp (ВЕРСИЯ 5.0)
 
 #include "game_state.hpp"
 
@@ -6,14 +6,12 @@ namespace ofc {
 
     GameState::GameState(int num_players, int dealer_pos)
         : rng_(std::random_device{}()), num_players_(num_players) {
-        
         deck_.reserve(52);
         dealt_cards_.reserve(5);
         my_discards_.resize(num_players);
         for(auto& v : my_discards_) v.reserve(4);
         opponent_discard_counts_.resize(num_players);
         boards_.resize(num_players);
-
         reset(dealer_pos);
     }
 
@@ -24,11 +22,9 @@ namespace ofc {
             board.middle.fill(INVALID_CARD);
             board.bottom.fill(INVALID_CARD);
         }
-
         deck_.resize(52);
         std::iota(deck_.begin(), deck_.end(), 0);
         std::shuffle(deck_.begin(), deck_.end(), rng_);
-
         if (dealer_pos == -1) {
             std::uniform_int_distribution<int> dist(0, num_players_ - 1);
             dealer_pos_ = dist(rng_);
@@ -36,12 +32,10 @@ namespace ofc {
             this->dealer_pos_ = dealer_pos;
         }
         current_player_ = (dealer_pos_ + 1) % num_players_;
-    
         for (auto& discards : my_discards_) {
             discards.clear();
         }
         std::fill(opponent_discard_counts_.begin(), opponent_discard_counts_.end(), 0);
-
         deal_cards();
     }
 
@@ -85,7 +79,7 @@ namespace ofc {
             cards_to_place = dealt_cards_;
             generate_random_placements(cards_to_place, INVALID_CARD, out_actions, action_limit);
         } else {
-            size_t limit_per_discard = action_limit / 3 + 1;
+            size_t limit_per_discard = action_limit > 0 ? (action_limit / 3 + 1) : 0;
             for (int i = 0; i < 3; ++i) {
                 cards_to_place.clear();
                 Card current_discarded = dealt_cards_[i];
@@ -97,7 +91,7 @@ namespace ofc {
         }
         
         std::shuffle(out_actions.begin(), out_actions.end(), rng_);
-        if (out_actions.size() > action_limit) {
+        if (action_limit > 0 && out_actions.size() > action_limit) {
             out_actions.resize(action_limit);
         }
     }
