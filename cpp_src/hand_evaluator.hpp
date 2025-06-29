@@ -1,20 +1,21 @@
-// mccfr_ofc-main/cpp_src/hand_evaluator.hpp
+// D2CFR-main/cpp_src/hand_evaluator.hpp (НОВАЯ, БЫСТРАЯ ВЕРСИЯ)
 
 #pragma once
 #include "card.hpp"
-#include <omp/HandEvaluator.h>
+#include <omp/HandEvaluator.h> // Оставляем только для 5-карточных рук
 #include <string>
 #include <tuple>
 #include <unordered_map>
 #include <map>
 #include <vector>
 #include <algorithm>
+#include <array>
 
 namespace ofc {
 
     struct HandRank {
         int rank_value;
-        int hand_class;
+        int hand_class; // 6 = Trips, 8 = Pair, 9 = High Card
         std::string type_str;
 
         bool operator<(const HandRank& other) const {
@@ -25,26 +26,35 @@ namespace ofc {
     class HandEvaluator {
     public:
         HandEvaluator() {
-            class_to_string_map_ = {
-                {1, "Straight Flush"}, {2, "Four of a Kind"}, {3, "Full House"},
-                {4, "Flush"}, {5, "Straight"}, {6, "Three of a Kind"},
-                {7, "Two Pair"}, {8, "Pair"}, {9, "High Card"}
-            };
+            // Инициализируем lookup-таблицу для 3-карточных рук
             init_3_card_lookup();
         }
 
         inline HandRank evaluate(const CardSet& cards) const {
             if (cards.size() == 5) {
+                // Для 5 карт используем быструю библиотеку, как и раньше
                 omp::Hand h = omp::Hand::empty();
                 for (Card c : cards) h += omp::Hand(c);
                 int rank_value = evaluator_5_card_.evaluate(h);
                 int hand_class_omp = rank_value >> 12;
-                int hand_class = (hand_class_omp == 0) ? 9 : 10 - hand_class_omp;
-                return {rank_value, hand_class, class_to_string_map_.at(hand_class)};
+                
+                // Преобразуем класс руки из omp в нашу систему
+                // 9-1=8(SF), 9-2=7(4K), ..., 9-8=1(Pair), 9-9=0(HC) -> +1
+                int hand_class = (hand_class_omp > 0) ? (10 - hand_class_omp) : 9;
+                
+                static const std::map<int, std::string> class_to_string_map_5 = {
+                    {1, "Straight Flush"}, {2, "Four of a Kind"}, {3, "Full House"},
+                    {4, "Flush"}, {5, "Straight"}, {6, "Three of a Kind"},
+                    {7, "Two Pair"}, {8, "Pair"}, {9, "High Card"}
+                };
+                return {rank_value, hand_class, class_to_string_map_5.at(hand_class)};
             }
             if (cards.size() == 3) {
-                auto it = evaluator_3_card_lookup_.find(get_3_card_key(cards));
-                if (it != evaluator_3_card_lookup_.end()) return it->second;
+                // УЛУЧШЕНО: Молниеносный поиск в массиве вместо unordered_map
+                std::array<int, 3> ranks = {get_rank(cards[0]), get_rank(cards[1]), get_rank(cards[2])};
+                std::sort(ranks.rbegin(), ranks.rend());
+                int key = ranks[0] * 169 + ranks[1] * 13 + ranks[2];
+                return evaluator_3_card_lookup_[key];
             }
             return {9999, 9, "Invalid"};
         }
@@ -52,23 +62,20 @@ namespace ofc {
         inline int get_royalty(const CardSet& cards, const std::string& row_name) const {
             static const std::unordered_map<std::string, int> ROYALTY_BOTTOM = {{"Straight", 2}, {"Flush", 4}, {"Full House", 6}, {"Four of a Kind", 10}, {"Straight Flush", 15}, {"Royal Flush", 25}};
             static const std::unordered_map<std::string, int> ROYALTY_MIDDLE = {{"Three of a Kind", 2}, {"Straight", 4}, {"Flush", 8}, {"Full House", 12}, {"Four of a Kind", 20}, {"Straight Flush", 30}, {"Royal Flush", 50}};
-            
-            // --- ИЗМЕНЕНО: Финальная версия роялти согласно вашему запросу ---
-            static const std::array<int, 13> ROYALTY_TOP_PAIRS = {0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 10, 11, 12}; // 66..JJ, QQ, KK, AA
-            static const std::array<int, 13> ROYALTY_TOP_TRIPS = {13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25}; // 222 -> 13, ..., AAA -> 25
-            // ----------------------------------------------------------------
+            static const std::array<int, 13> ROYALTY_TOP_PAIRS = {0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 10, 11, 12}; // 66..AA
+            static const std::array<int, 13> ROYALTY_TOP_TRIPS = {13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25}; // 222..AAA
 
             if (cards.empty()) return 0;
             HandRank hr = evaluate(cards);
 
             if (row_name == "top") {
-                if (hr.type_str == "Trips") {
+                if (hr.hand_class == 6) { // Trips
                     int rank = get_rank(cards[0]);
-                    if (rank >= 0 && rank < 13) return ROYALTY_TOP_TRIPS[rank];
-                } else if (hr.type_str == "Pair") {
-                    std::vector<int> ranks = {get_rank(cards[0]), get_rank(cards[1]), get_rank(cards[2])};
+                    return ROYALTY_TOP_TRIPS[rank];
+                } else if (hr.hand_class == 8) { // Pair
+                    std::array<int, 3> ranks = {get_rank(cards[0]), get_rank(cards[1]), get_rank(cards[2])};
                     int pair_rank = (ranks[0] == ranks[1] || ranks[0] == ranks[2]) ? ranks[0] : ranks[1];
-                    if (pair_rank >= 4 && pair_rank < 13) return ROYALTY_TOP_PAIRS[pair_rank];
+                    if (pair_rank >= 4) return ROYALTY_TOP_PAIRS[pair_rank];
                 }
             } else if (row_name == "middle") {
                 auto it = ROYALTY_MIDDLE.find(hr.type_str);
@@ -82,33 +89,33 @@ namespace ofc {
 
     private:
         omp::HandEvaluator evaluator_5_card_;
-        std::unordered_map<int, HandRank> evaluator_3_card_lookup_;
-        std::unordered_map<int, std::string> class_to_string_map_;
+        // УЛУЧШЕНО: Простой массив вместо хэш-таблицы. Размер 13*13*13 = 2197.
+        std::array<HandRank, 2197> evaluator_3_card_lookup_;
 
-        inline int get_3_card_key(const CardSet& cards) const {
-            if (cards.size() != 3) return -1;
-            std::vector<int> ranks = {get_rank(cards[0]), get_rank(cards[1]), get_rank(cards[2])};
-            std::sort(ranks.rbegin(), ranks.rend());
-            return ranks[0] * 169 + ranks[1] * 13 + ranks[2];
-        }
-
-        inline void init_3_card_lookup() {
+        void init_3_card_lookup() {
+            // Trips (e.g., AAA, KKK)
             for (int r = 0; r <= 12; ++r) {
-                evaluator_3_card_lookup_[r*169 + r*13 + r] = {13 - r, 6, "Trips"};
+                int key = r * 169 + r * 13 + r;
+                evaluator_3_card_lookup_[key] = {1000 + (12-r), 6, "Trips"};
             }
-            int rank_val = 14;
+            // Pairs (e.g., AAK, AAQ)
+            int rank_val = 2000;
             for (int p = 12; p >= 0; --p) {
                 for (int k = 12; k >= 0; --k) {
                     if (p == k) continue;
-                    std::vector<int> ranks = {p, p, k};
+                    std::array<int, 3> ranks = {p, p, k};
                     std::sort(ranks.rbegin(), ranks.rend());
-                    evaluator_3_card_lookup_[ranks[0]*169+ranks[1]*13+ranks[2]] = {rank_val++, 8, "Pair"};
+                    int key = ranks[0] * 169 + ranks[1] * 13 + ranks[2];
+                    evaluator_3_card_lookup_[key] = {rank_val++, 8, "Pair"};
                 }
             }
+            // High Card (e.g., AKJ, QJT)
+            rank_val = 3000;
             for (int r1 = 12; r1 >= 2; --r1) {
                 for (int r2 = r1 - 1; r2 >= 1; --r2) {
                     for (int r3 = r2 - 1; r3 >= 0; --r3) {
-                        evaluator_3_card_lookup_[r1*169+r2*13+r3] = {rank_val++, 9, "High Card"};
+                        int key = r1 * 169 + r2 * 13 + r3;
+                        evaluator_3_card_lookup_[key] = {rank_val++, 9, "High Card"};
                     }
                 }
             }
