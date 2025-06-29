@@ -26,7 +26,7 @@ from ofc_engine import DeepMCCFR, SharedReplayBuffer
 
 # --- ГИПЕРПАРАМЕТРЫ ---
 INPUT_SIZE = 1486 
-ACTION_LIMIT = 12
+ACTION_LIMIT = 4
 LEARNING_RATE = 0.001
 REPLAY_BUFFER_CAPACITY = 2000000
 BATCH_SIZE = 1024
