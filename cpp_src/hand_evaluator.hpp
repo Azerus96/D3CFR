@@ -1,8 +1,8 @@
-// D2CFR-main/cpp_src/hand_evaluator.hpp (НОВАЯ, БЫСТРАЯ ВЕРСИЯ)
+// D2CFR-main/cpp_src/hand_evaluator.hpp (ВЕРСИЯ 6.0 - MULTIPROCESSING)
 
 #pragma once
 #include "card.hpp"
-#include <omp/HandEvaluator.h> // Оставляем только для 5-карточных рук
+#include <omp/HandEvaluator.h>
 #include <string>
 #include <tuple>
 #include <unordered_map>
@@ -26,20 +26,16 @@ namespace ofc {
     class HandEvaluator {
     public:
         HandEvaluator() {
-            // Инициализируем lookup-таблицу для 3-карточных рук
             init_3_card_lookup();
         }
 
         inline HandRank evaluate(const CardSet& cards) const {
             if (cards.size() == 5) {
-                // Для 5 карт используем быструю библиотеку, как и раньше
                 omp::Hand h = omp::Hand::empty();
                 for (Card c : cards) h += omp::Hand(c);
                 int rank_value = evaluator_5_card_.evaluate(h);
                 int hand_class_omp = rank_value >> 12;
                 
-                // Преобразуем класс руки из omp в нашу систему
-                // 9-1=8(SF), 9-2=7(4K), ..., 9-8=1(Pair), 9-9=0(HC) -> +1
                 int hand_class = (hand_class_omp > 0) ? (10 - hand_class_omp) : 9;
                 
                 static const std::map<int, std::string> class_to_string_map_5 = {
@@ -50,7 +46,6 @@ namespace ofc {
                 return {rank_value, hand_class, class_to_string_map_5.at(hand_class)};
             }
             if (cards.size() == 3) {
-                // УЛУЧШЕНО: Молниеносный поиск в массиве вместо unordered_map
                 std::array<int, 3> ranks = {get_rank(cards[0]), get_rank(cards[1]), get_rank(cards[2])};
                 std::sort(ranks.rbegin(), ranks.rend());
                 int key = ranks[0] * 169 + ranks[1] * 13 + ranks[2];
@@ -62,8 +57,8 @@ namespace ofc {
         inline int get_royalty(const CardSet& cards, const std::string& row_name) const {
             static const std::unordered_map<std::string, int> ROYALTY_BOTTOM = {{"Straight", 2}, {"Flush", 4}, {"Full House", 6}, {"Four of a Kind", 10}, {"Straight Flush", 15}, {"Royal Flush", 25}};
             static const std::unordered_map<std::string, int> ROYALTY_MIDDLE = {{"Three of a Kind", 2}, {"Straight", 4}, {"Flush", 8}, {"Full House", 12}, {"Four of a Kind", 20}, {"Straight Flush", 30}, {"Royal Flush", 50}};
-            static const std::array<int, 13> ROYALTY_TOP_PAIRS = {0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 10, 11, 12}; // 66..AA
-            static const std::array<int, 13> ROYALTY_TOP_TRIPS = {13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25}; // 222..AAA
+            static const std::array<int, 13> ROYALTY_TOP_PAIRS = {0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 10, 11, 12};
+            static const std::array<int, 13> ROYALTY_TOP_TRIPS = {13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25};
 
             if (cards.empty()) return 0;
             HandRank hr = evaluate(cards);
@@ -89,7 +84,6 @@ namespace ofc {
 
     private:
         omp::HandEvaluator evaluator_5_card_;
-        // УЛУЧШЕНО: Простой массив вместо хэш-таблицы. Размер 13*13*13 = 2197.
         std::array<HandRank, 2197> evaluator_3_card_lookup_;
 
         void init_3_card_lookup() {
