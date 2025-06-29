@@ -1,4 +1,4 @@
-// D2CFR-main/pybind_wrapper.cpp (ФИНАЛЬНАЯ ОПТИМИЗИРОВАННАЯ ВЕРСИЯ)
+// D2CFR-main/pybind_wrapper.cpp (ВЕРСИЯ 5.0)
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
