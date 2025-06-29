@@ -1,4 +1,4 @@
-// D2CFR/pybind_wrapper.cpp (ФИНАЛЬНАЯ ВЕРСИЯ 3.0 - НАДЕЖНОЕ КОПИРОВАНИЕ)
+// D2CFR/pybind_wrapper.cpp (ФИНАЛЬНАЯ ВЕРСИЯ 4.0 - ЯВНОЕ СОЗДАНИЕ)
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -21,29 +21,33 @@ PYBIND11_MODULE(ofc_engine, m) {
             auto result_pair = self.sample(batch_size);
             
             if (result_pair.first.empty()) {
-                // Создаем пустые numpy массивы правильной формы
-                py::array_t<float> empty_infosets({0, (long)ofc::INFOSET_SIZE});
-                py::array_t<float> empty_targets({0, (long)self.get_max_actions()});
+                // ИСПРАВЛЕНО: Явное создание пустых массивов через std::vector
+                std::vector<ssize_t> shape_infosets = {0, ofc::INFOSET_SIZE};
+                std::vector<ssize_t> shape_targets = {0, (ssize_t)self.get_max_actions()};
+                py::array_t<float> empty_infosets(shape_infosets);
+                py::array_t<float> empty_targets(shape_targets);
                 return std::make_pair(empty_infosets, empty_targets);
             }
             
             // --- НАДЕЖНЫЙ СПОСОБ: КОПИРОВАНИЕ ДАННЫХ ---
 
             // 1. Создаем numpy массив для инфосетов нужного размера
-            py::array_t<float> infosets_np({
+            std::vector<ssize_t> shape_infosets = {
                 static_cast<ssize_t>(batch_size), 
                 static_cast<ssize_t>(ofc::INFOSET_SIZE)
-            });
+            };
+            py::array_t<float> infosets_np(shape_infosets);
             // Получаем указатель на его буфер
             float* infosets_ptr = static_cast<float*>(infosets_np.request().ptr);
             // Копируем данные из C++ вектора в numpy массив
             std::copy(result_pair.first.begin(), result_pair.first.end(), infosets_ptr);
 
             // 2. Создаем numpy массив для таргетов
-            py::array_t<float> targets_np({
+            std::vector<ssize_t> shape_targets = {
                 static_cast<ssize_t>(batch_size), 
                 static_cast<ssize_t>(self.get_max_actions())
-            });
+            };
+            py::array_t<float> targets_np(shape_targets);
             float* targets_ptr = static_cast<float*>(targets_np.request().ptr);
             std::copy(result_pair.second.begin(), result_pair.second.end(), targets_ptr);
 
