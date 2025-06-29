@@ -23,6 +23,37 @@ namespace ofc {
         deal_cards();
     }
 
+// ... после конструктора GameState::GameState(...) ...
+
+    void GameState::reset(int dealer_pos) {
+        street_ = 1;
+        // Сбрасываем доски в начальное состояние
+        for (auto& board : boards_) {
+            board.top.fill(INVALID_CARD);
+            board.middle.fill(INVALID_CARD);
+            board.bottom.fill(INVALID_CARD);
+        }
+
+        deck_.resize(52);
+        std::iota(deck_.begin(), deck_.end(), 0);
+        std::shuffle(deck_.begin(), deck_.end(), rng_);
+
+        if (dealer_pos == -1) {
+            std::uniform_int_distribution<int> dist(0, num_players_ - 1);
+            dealer_pos_ = dist(rng_);
+        } else {
+            this->dealer_pos_ = dealer_pos;
+        }
+        current_player_ = (dealer_pos_ + 1) % num_players_;
+    
+        for (auto& discards : my_discards_) {
+            discards.clear();
+        }
+        opponent_discard_counts_.assign(num_players_, 0);
+
+        deal_cards();
+    }
+
     std::pair<float, float> GameState::get_payoffs(const HandEvaluator& evaluator) const {
         const int SCOOP_BONUS = 3;
         const Board& p1_board = boards_[0];
@@ -74,7 +105,7 @@ namespace ofc {
             }
         }
         
-    // std::shuffle(actions.begin(), actions.end(), rng_);
+        std::shuffle(actions.begin(), actions.end(), rng_);
         if (actions.size() > action_limit) {
             actions.resize(action_limit);
         }
