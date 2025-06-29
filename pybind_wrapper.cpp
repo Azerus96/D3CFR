@@ -1,4 +1,4 @@
-// D2CFR/pybind_wrapper.cpp (ПОЛНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ 2.0)
+// D2CFR/pybind_wrapper.cpp (ФИНАЛЬНАЯ ВЕРСИЯ 3.0 - НАДЕЖНОЕ КОПИРОВАНИЕ)
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -21,35 +21,33 @@ PYBIND11_MODULE(ofc_engine, m) {
             auto result_pair = self.sample(batch_size);
             
             if (result_pair.first.empty()) {
-                // ИСПРАВЛЕНО: Правильный способ создания пустых numpy массивов
+                // Создаем пустые numpy массивы правильной формы
                 py::array_t<float> empty_infosets({0, (long)ofc::INFOSET_SIZE});
                 py::array_t<float> empty_targets({0, (long)self.get_max_actions()});
                 return std::make_pair(empty_infosets, empty_targets);
             }
             
-            // Создаем numpy массив для инфосетов.
-            // pybind11 достаточно умен, чтобы управлять памятью вектора, пока numpy массив жив.
-            // Это zero-copy операция.
-            py::capsule free_when_done(result_pair.first.data(), [](void *f) {
-                // Этот лямбда-захват гарантирует, что векторы не будут уничтожены, пока капсула жива
-                // Но так как мы возвращаем пару, векторы будут жить до конца выражения.
-                // Для безопасности можно было бы аллоцировать их в куче, но здесь это избыточно.
+            // --- НАДЕЖНЫЙ СПОСОБ: КОПИРОВАНИЕ ДАННЫХ ---
+
+            // 1. Создаем numpy массив для инфосетов нужного размера
+            py::array_t<float> infosets_np({
+                static_cast<ssize_t>(batch_size), 
+                static_cast<ssize_t>(ofc::INFOSET_SIZE)
             });
-            py::array_t<float> infosets_np(
-                {static_cast<ssize_t>(batch_size), static_cast<ssize_t>(ofc::INFOSET_SIZE)},
-                result_pair.first.data(),
-                free_when_done
-            );
+            // Получаем указатель на его буфер
+            float* infosets_ptr = static_cast<float*>(infosets_np.request().ptr);
+            // Копируем данные из C++ вектора в numpy массив
+            std::copy(result_pair.first.begin(), result_pair.first.end(), infosets_ptr);
 
-            // Создаем numpy массив для таргетов
-            py::capsule free_when_done2(result_pair.second.data(), [](void *f) {});
-            py::array_t<float> targets_np(
-                {static_cast<ssize_t>(batch_size), static_cast<ssize_t>(self.get_max_actions())},
-                result_pair.second.data(),
-                free_when_done2
-            );
+            // 2. Создаем numpy массив для таргетов
+            py::array_t<float> targets_np({
+                static_cast<ssize_t>(batch_size), 
+                static_cast<ssize_t>(self.get_max_actions())
+            });
+            float* targets_ptr = static_cast<float*>(targets_np.request().ptr);
+            std::copy(result_pair.second.begin(), result_pair.second.end(), targets_ptr);
 
-            // Возвращаем пару numpy массивов в Python
+            // Возвращаем пару numpy массивов в Python. Теперь они владеют своими данными.
             return std::make_pair(infosets_np, targets_np);
         }, "Sample a batch from the buffer.", py::call_guard<py::gil_scoped_release>())
         
