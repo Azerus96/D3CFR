@@ -1,4 +1,4 @@
-// D2CFR-main/pybind_wrapper.cpp (ПОЛНАЯ ИСПРАВЛЕННАЯ ВЕРСИЯ)
+// D2CFR/pybind_wrapper.cpp (ПОЛНАЯ ВЕРСИЯ ДЛЯ ПРОФИЛИРОВАНИЯ)
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -8,41 +8,58 @@
 
 namespace py = pybind11;
 
+// Предполагаем, что размер инфосета - константа. Если нет, его нужно передавать.
+const int INFOSET_SIZE = 1486; 
+
 PYBIND11_MODULE(ofc_engine, m) {
-    m.doc() = "OFC Engine with Thread-Safe In-Memory Replay Buffer";
+    m.doc() = "OFC Pineapple Poker Engine with Deep MCCFR";
 
-    // Биндинг для SharedReplayBuffer
+    // --- Биндинг для SharedReplayBuffer ---
     py::class_<ofc::SharedReplayBuffer>(m, "SharedReplayBuffer")
-        // ИЗМЕНЕНИЕ 1: Конструктор теперь принимает capacity и action_limit, чтобы C++ знал размер буфера.
-        .def(py::init<uint64_t, int>(), py::arg("capacity"), py::arg("action_limit"))
-        .def("get_count", &ofc::SharedReplayBuffer::get_count, "Returns the current number of items in the buffer.")
-        // ИЗМЕНЕНИЕ 2: sample теперь должен знать action_limit для создания numpy-массива правильного размера.
-        // Мы получаем его из самого объекта буфера.
-        .def("sample", [](ofc::SharedReplayBuffer &buffer, int batch_size) {
-            // Получаем action_limit из самого объекта буфера, чтобы гарантировать консистентность.
-            int action_limit = buffer.get_action_limit(); 
+        .def(py::init<size_t, size_t>(), py::arg("capacity"), py::arg("max_actions"))
+        
+        // Метод sample, который возвращает пару numpy-массивов
+        .def("sample", [](ofc::SharedReplayBuffer &self, size_t batch_size) {
+            // Вызываем C++ метод sample, который возвращает пару векторов
+            auto result_pair = self.sample(batch_size);
             
-            // Создаем numpy массивы правильного размера.
-            auto infosets_np = py::array_t<float>({batch_size, ofc::INFOSET_SIZE});
-            auto regrets_np = py::array_t<float>({batch_size, action_limit});
-
-            // Получаем указатели на данные в numpy массивах.
+            // Создаем numpy массив для инфосетов
+            // Важно: мы не можем просто вернуть указатель, так как векторы временные.
+            // Мы должны скопировать данные.
+            py::array_t<float> infosets_np(
+                {static_cast<ssize_t>(batch_size), static_cast<ssize_t>(INFOSET_SIZE)}
+            );
+            // Получаем прямой доступ к буферу numpy массива
             float* infosets_ptr = static_cast<float*>(infosets_np.request().ptr);
-            float* regrets_ptr = static_cast<float*>(regrets_np.request().ptr);
+            // Копируем данные из вектора в numpy массив
+            std::copy(result_pair.first.begin(), result_pair.first.end(), infosets_ptr);
 
-            // Вызываем C++ функцию, которая заполнит эти массивы.
-            buffer.sample(batch_size, infosets_ptr, regrets_ptr);
+            // Создаем numpy массив для таргетов
+            size_t max_actions = self.get_max_actions();
+            py::array_t<float> targets_np(
+                {static_cast<ssize_t>(batch_size), static_cast<ssize_t>(max_actions)}
+            );
+            float* targets_ptr = static_cast<float*>(targets_np.request().ptr);
+            std::copy(result_pair.second.begin(), result_pair.second.end(), targets_ptr);
 
-            return std::make_pair(infosets_np, regrets_np);
-        }, py::arg("batch_size"), "Samples a batch and returns (infosets, regrets) as numpy arrays.");
+            // Возвращаем пару numpy массивов в Python
+            return std::make_pair(infosets_np, targets_np);
+        }, "Sample a batch from the buffer.", py::call_guard<py::gil_scoped_release>())
+        
+        .def("get_count", &ofc::SharedReplayBuffer::get_count, "Get current size of the buffer.")
+        .def("get_max_actions", &ofc::SharedReplayBuffer::get_max_actions, "Get max actions limit.");
 
-    // Биндинг для солвера
+
+    // --- Биндинг для DeepMCCFR ---
     py::class_<ofc::DeepMCCFR>(m, "DeepMCCFR")
-        .def(py::init([](const std::string& model_path, size_t action_limit, ofc::SharedReplayBuffer& buffer) {
-            // Передаем указатель на существующий объект буфера в конструктор C++ класса.
-            return std::make_unique<ofc::DeepMCCFR>(model_path, action_limit, &buffer);
-        }), py::arg("model_path"), py::arg("action_limit"), py::arg("buffer"))
-        // Освобождаем GIL (Global Interpreter Lock) во время выполнения C++ кода,
-        // чтобы Python мог выполнять другие задачи, и чтобы C++ воркеры работали по-настоящему параллельно.
-        .def("run_traversal", &ofc::DeepMCCFR::run_traversal, "Runs one full game traversal.", py::call_guard<py::gil_scoped_release>());
+        .def(py::init<const std::string&, size_t, ofc::SharedReplayBuffer*>(), 
+             py::arg("model_path"), py::arg("action_limit"), py::arg("buffer"))
+        
+        // --- ГЛАВНОЕ ИСПРАВЛЕНИЕ ---
+        // Мы привязываем новую функцию run_traversal_for_profiling, которую создали в C++.
+        // Старой функции run_traversal больше не существует.
+        .def("run_traversal_for_profiling", 
+             &ofc::DeepMCCFR::run_traversal_for_profiling, 
+             "Runs one full game traversal and returns profiling stats as a list of doubles.", 
+             py::call_guard<py::gil_scoped_release>());
 }
