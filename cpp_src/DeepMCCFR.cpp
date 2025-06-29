@@ -1,4 +1,4 @@
-// D2CFR-main/cpp_src/DeepMCCFR.cpp (ФИНАЛЬНАЯ ОПТИМИЗИРОВАННАЯ ВЕРСИЯ)
+// D2CFR-main/cpp_src/DeepMCCFR.cpp (ВЕРСИЯ 5.0)
 
 #include "DeepMCCFR.hpp"
 #include <stdexcept>
