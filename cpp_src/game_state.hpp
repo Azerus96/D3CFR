@@ -1,4 +1,4 @@
-// D2CFR-main/cpp_src/game_state.hpp (ФИНАЛЬНАЯ ВЕРСИЯ)
+// D2CFR-main/cpp_src/game_state.hpp (ФИНАЛЬНАЯ ОПТИМИЗИРОВАННАЯ ВЕРСИЯ)
 
 #pragma once
 #include "board.hpp"
@@ -13,7 +13,7 @@
 
 namespace ofc {
 
-    // УЛУЧШЕНО: UndoInfo теперь не хранит копии векторов.
+    // УЛУЧШЕНО: UndoInfo теперь не хранит полные копии векторов.
     struct UndoInfo {
         Action action;
         int prev_street;
