@@ -1,12 +1,15 @@
-// D2CFR-main/cpp_src/DeepMCCFR.cpp
+// D2CFR-main/cpp_src/DeepMCCFR.cpp (ИСПРАВЛЕННАЯ ВЕРСИЯ)
 
 #include "DeepMCCFR.hpp"
+#include <pybind11/pybind11.h> // <-- ВАЖНО: ДОБАВИТЬ ЭТОТ ИНКЛЮД
 #include <stdexcept>
 #include <iostream>
 #include <numeric>
 #include <algorithm>
 #include <torch/torch.h>
 #include <chrono>
+
+namespace py = pybind11; // Добавляем псевдоним для удобства
 
 namespace ofc {
 
@@ -21,29 +24,33 @@ DeepMCCFR::DeepMCCFR(const std::string& model_path, size_t action_limit, SharedR
     }
 }
 
-// Новая функция, которая будет вызываться из Python
+// ИЗМЕНЕНО: Добавлено ручное управление GIL
 std::vector<double> DeepMCCFR::run_traversal_for_profiling() {
-    // Создаем локальную структуру для статистики на один вызов
-    ProfilingStats stats;
-
-    GameState state_p0;
-    traverse(state_p0, 0, stats);
-    GameState state_p1;
-    traverse(state_p1, 1, stats);
-
-    // Если были вызовы traverse, вычисляем средние значения и возвращаем их
-    if (stats.call_count > 0) {
-        return {
-            stats.total_traverse_time.count() / stats.call_count,
-            stats.get_legal_actions_time.count() / stats.call_count,
-            stats.featurize_time.count() / stats.call_count,
-            stats.model_inference_time.count() / stats.call_count,
-            stats.buffer_push_time.count() / stats.call_count
-        };
-    }
+    std::vector<double> result;
     
-    // Возвращаем пустой вектор, если ничего не произошло
-    return {};
+    // Создаем блок, внутри которого GIL будет освобожден
+    {
+        py::gil_scoped_release release; // Освобождаем GIL здесь
+
+        // Вся тяжелая работа выполняется здесь, пока GIL освобожден
+        ProfilingStats stats;
+        GameState state_p0;
+        traverse(state_p0, 0, stats);
+        GameState state_p1;
+        traverse(state_p1, 1, stats);
+
+        if (stats.call_count > 0) {
+            result = {
+                stats.total_traverse_time.count() / stats.call_count,
+                stats.get_legal_actions_time.count() / stats.call_count,
+                stats.featurize_time.count() / stats.call_count,
+                stats.model_inference_time.count() / stats.call_count,
+                stats.buffer_push_time.count() / stats.call_count
+            };
+        }
+    } // GIL автоматически захватывается обратно при выходе из блока
+
+    return result;
 }
 
 // featurize остается без изменений
@@ -90,8 +97,9 @@ std::vector<float> DeepMCCFR::featurize(const GameState& state, int player_view)
     return features;
 }
 
-// Изменено: traverse теперь принимает ProfilingStats& stats
+// traverse остается без изменений
 std::map<int, float> DeepMCCFR::traverse(GameState& state, int traversing_player, ProfilingStats& stats) {
+    // ... ваш код traverse без изменений ...
     auto t_start_total = std::chrono::high_resolution_clock::now();
 
     if (state.is_terminal()) {
@@ -110,7 +118,6 @@ std::map<int, float> DeepMCCFR::traverse(GameState& state, int traversing_player
 
     if (num_actions == 0) {
         UndoInfo undo_info = state.apply_action({{}, INVALID_CARD}, traversing_player);
-        // Рекурсивный вызов тоже передает stats
         auto result = traverse(state, traversing_player, stats);
         state.undo_action(undo_info, traversing_player);
         return result;
@@ -119,7 +126,6 @@ std::map<int, float> DeepMCCFR::traverse(GameState& state, int traversing_player
     if (current_player != traversing_player) {
         int action_idx = state.get_rng()() % num_actions;
         UndoInfo undo_info = state.apply_action(legal_actions[action_idx], traversing_player);
-        // Рекурсивный вызов тоже передает stats
         auto result = traverse(state, traversing_player, stats);
         state.undo_action(undo_info, traversing_player);
         return result;
@@ -162,7 +168,6 @@ std::map<int, float> DeepMCCFR::traverse(GameState& state, int traversing_player
 
     for (int i = 0; i < num_actions; ++i) {
         UndoInfo undo_info = state.apply_action(legal_actions[i], traversing_player);
-        // Рекурсивный вызов тоже передает stats
         action_utils[i] = traverse(state, traversing_player, stats);
         state.undo_action(undo_info, traversing_player);
 
