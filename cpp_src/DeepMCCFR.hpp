@@ -1,4 +1,4 @@
-// D2CFR-main/cpp_src/DeepMCCFR.hpp (ФИНАЛЬНАЯ ОПТИМИЗИРОВАННАЯ ВЕРСИЯ)
+// D2CFR-main/cpp_src/DeepMCCFR.hpp (ВЕРСИЯ 5.0)
 
 #pragma once
 #include "game_state.hpp"
