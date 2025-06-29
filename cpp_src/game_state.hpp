@@ -1,4 +1,4 @@
-// D2CFR-main/cpp_src/game_state.hpp (ПОЛНАЯ ВЕРСИЯ ДЛЯ ЭТАПА 2)
+// D2CFR-main/cpp_src/game_state.hpp (ФИНАЛЬНАЯ ВЕРСИЯ)
 
 #pragma once
 #include "board.hpp"
@@ -10,18 +10,14 @@
 #include <functional>
 #include <map>
 #include <string>
-#include <unordered_set>
 
 namespace ofc {
 
-    // УЛУЧШЕНО: UndoInfo теперь не хранит копии векторов.
-    // Она хранит только само действие, чтобы знать, какие карты убрать с доски.
-    // Восстановление колоды и розданных карт будет происходить по-другому.
     struct UndoInfo {
         Action action;
         int prev_street;
         int prev_current_player;
-        CardSet dealt_cards_before_action; // Карты, которые были розданы ДО этого хода
+        CardSet dealt_cards_before_action;
     };
 
     class GameState {
@@ -37,13 +33,8 @@ namespace ofc {
 
         std::pair<float, float> get_payoffs(const HandEvaluator& evaluator) const;
         
-        // УЛУЧШЕНО: get_legal_actions теперь заполняет вектор по ссылке, а не возвращает его.
         void get_legal_actions(size_t action_limit, std::vector<Action>& out_actions) const;
-
-        // УЛУЧШЕНО: apply_action теперь заполняет UndoInfo по ссылке.
         void apply_action(const Action& action, int player_view, UndoInfo& undo_info);
-        
-        // УЛУЧШЕНО: undo_action использует новую UndoInfo.
         void undo_action(const UndoInfo& undo_info, int player_view);
         
         int get_street() const { return street_; }
@@ -58,7 +49,6 @@ namespace ofc {
 
     private:
         void deal_cards();
-        // УЛУЧШЕНО: generate_random_placements теперь заполняет вектор по ссылке.
         void generate_random_placements(const CardSet& cards, Card discarded, std::vector<Action>& actions, size_t limit) const;
 
         int num_players_;
@@ -73,5 +63,8 @@ namespace ofc {
         std::vector<int> opponent_discard_counts_;
         
         mutable std::mt19937 rng_;
+
+        mutable CardSet p1_top_buf, p1_mid_buf, p1_bot_buf;
+        mutable CardSet p2_top_buf, p2_mid_buf, p2_bot_buf;
     };
 }
