@@ -1,4 +1,4 @@
-# D2CFR-main/python_src/train.py (ВЕРСИЯ 5.0)
+# D2CFR-main/python_src/train.py (ФИНАЛЬНАЯ ВЕРСИЯ С КВАНТОВАНИЕМ)
 
 import os
 import time
@@ -29,7 +29,7 @@ ACTION_LIMIT = 4 # Разумный компромисс для скорости
 LEARNING_RATE = 0.001
 REPLAY_BUFFER_CAPACITY = 2000000
 BATCH_SIZE = 256
-TRAINING_BLOCK_SIZE = 24 # 10 задач на воркера
+TRAINING_BLOCK_SIZE = 48 # 10 задач на воркера
 SAVE_INTERVAL_BLOCKS = 5 
 MODEL_PATH = "d2cfr_model.pth"
 TORCHSCRIPT_MODEL_PATH = "d2cfr_model_script.pt"
@@ -69,12 +69,20 @@ def main():
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
     criterion = nn.MSELoss()
 
-    print("\nConverting model to TorchScript for C++...", flush=True)
+    # --- КВАНТОВАНИЕ МОДЕЛИ ---
+    print("\nQuantizing model for faster CPU inference...", flush=True)
+    model.to('cpu')
     model.eval()
+    quantized_model = torch.quantization.quantize_dynamic(
+        model, {torch.nn.Linear}, dtype=torch.qint8
+    )
+    print("Model quantization complete.", flush=True)
+
+    print("\nConverting QUANTIZED model to TorchScript for C++...", flush=True)
     example_input = torch.randn(1, INPUT_SIZE).to(device)
-    traced_script_module = torch.jit.trace(model, example_input)
+    traced_script_module = torch.jit.trace(quantized_model, example_input)
     traced_script_module.save(TORCHSCRIPT_MODEL_PATH)
-    print(f"TorchScript model saved to {TORCHSCRIPT_MODEL_PATH}", flush=True)
+    print(f"Quantized TorchScript model saved to {TORCHSCRIPT_MODEL_PATH}", flush=True)
 
     replay_buffer = SharedReplayBuffer(REPLAY_BUFFER_CAPACITY, ACTION_LIMIT)
     solvers = [DeepMCCFR(TORCHSCRIPT_MODEL_PATH, ACTION_LIMIT, replay_buffer) for _ in range(NUM_WORKERS)]
@@ -114,6 +122,7 @@ def main():
                     print(f"Buffer size is too small, skipping training. Need {BATCH_SIZE}.", flush=True)
                     continue
 
+                # Для обучения используем оригинальную, неквантованную модель
                 model.train()
                 infosets_np, targets_np = replay_buffer.sample(BATCH_SIZE)
                 
@@ -136,9 +145,13 @@ def main():
                     print("-" * 50, flush=True)
                     print(f"Saving models at traversal {total_traversals:,}...", flush=True)
                     torch.save(model.state_dict(), MODEL_PATH)
+                    
+                    # Пересохраняем квантованную модель с новыми весами
                     model.eval()
-                    traced_script_module = torch.jit.trace(model, example_input)
+                    quantized_model = torch.quantization.quantize_dynamic(model, {torch.nn.Linear}, dtype=torch.qint8)
+                    traced_script_module = torch.jit.trace(quantized_model, example_input)
                     traced_script_module.save(TORCHSCRIPT_MODEL_PATH)
+                    
                     print("Models saved successfully.", flush=True)
                     print("-" * 50, flush=True)
 
@@ -151,7 +164,8 @@ def main():
         print("Saving final models...", flush=True)
         torch.save(model.state_dict(), "d2cfr_model_final.pth")
         model.eval()
-        traced_script_module = torch.jit.trace(model, example_input)
+        quantized_model = torch.quantization.quantize_dynamic(model, {torch.nn.Linear}, dtype=torch.qint8)
+        traced_script_module = torch.jit.trace(quantized_model, example_input)
         traced_script_module.save("d2cfr_model_script_final.pt")
         print("Models saved. Training finished.", flush=True)
 
