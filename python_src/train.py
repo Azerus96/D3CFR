@@ -14,8 +14,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # --- НАСТРОЙКИ (ЭКСПЕРИМЕНТ №1) ---
 # Проверяем гипотезу о конкуренции потоков
 # 1 воркер на 1 ядро, каждый воркер использует 1 поток для вычислений
-NUM_WORKERS = 96 
-NUM_COMPUTATION_THREADS = "1" 
+NUM_WORKERS = 24 
+NUM_COMPUTATION_THREADS = "4" 
 os.environ['OMP_NUM_THREADS'] = NUM_COMPUTATION_THREADS
 os.environ['OPENBLAS_NUM_THREADS'] = NUM_COMPUTATION_THREADS
 os.environ['MKL_NUM_THREADS'] = NUM_COMPUTATION_THREADS
@@ -32,8 +32,8 @@ INPUT_SIZE = 1486
 ACTION_LIMIT = 4 
 LEARNING_RATE = 0.001
 REPLAY_BUFFER_CAPACITY = 2000000
-BATCH_SIZE = 4096 # Увеличим, чтобы обучение не было узким местом
-TRAINING_BLOCK_SIZE = 96 # Адаптируем под количество воркеров
+BATCH_SIZE = 256 # Увеличим, чтобы обучение не было узким местом
+TRAINING_BLOCK_SIZE = 48 # Адаптируем под количество воркеров
 MODEL_PATH = "d2cfr_model.pth"
 TORCHSCRIPT_MODEL_PATH = "d2cfr_model_script.pt"
 
