@@ -14,12 +14,12 @@ import cProfile, pstats # Для профилирования
 # --- НАСТРОЙКИ ---
 # Используем те же оптимальные настройки, что и раньше
 
-os.environ['OMP_NUM_THREADS'] = 1
-os.environ['OPENBLAS_NUM_THREADS'] = 1
-os.environ['MKL_NUM_THREADS'] = 1
-os.environ['VECLIB_MAXIMUM_THREADS'] = 1
-os.environ['NUMEXPR_NUM_THREADS'] = 1
-torch.set_num_threads(int(1))
+os.environ['OMP_NUM_THREADS'] = "1"
+os.environ['OPENBLAS_NUM_THREADS'] = "1"
+os.environ['MKL_NUM_THREADS'] = "1"
+os.environ['VECLIB_MAXIMUM_THREADS'] = "1"
+os.environ['NUMEXPR_NUM_THREADS'] = "1"
+torch.set_num_threads(int("1"))
 
 from .model import DuelingNetwork
 from ofc_engine import DeepMCCFR, SharedReplayBuffer
