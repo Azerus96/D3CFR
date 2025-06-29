@@ -7,7 +7,6 @@ namespace ofc {
     GameState::GameState(int num_players, int dealer_pos)
         : rng_(std::random_device{}()), num_players_(num_players) {
         
-        // Резервируем память один раз
         deck_.reserve(52);
         dealt_cards_.reserve(5);
         my_discards_.resize(num_players);
@@ -15,7 +14,6 @@ namespace ofc {
         opponent_discard_counts_.resize(num_players);
         boards_.resize(num_players);
 
-        // Инициализируем состояние
         reset(dealer_pos);
     }
 
@@ -51,21 +49,26 @@ namespace ofc {
         const int SCOOP_BONUS = 3;
         const Board& p1_board = boards_[0];
         const Board& p2_board = boards_[1];
-
-        bool p1_foul = p1_board.is_foul(evaluator, p1_top_buf, p1_mid_buf, p1_bot_buf);
-        bool p2_foul = p2_board.is_foul(evaluator, p2_top_buf, p2_mid_buf, p2_bot_buf);
-        
-        int p1_royalty = p1_foul ? 0 : evaluator.get_royalty(p1_top_buf, "top") + evaluator.get_royalty(p1_mid_buf, "middle") + evaluator.get_royalty(p1_bot_buf, "bottom");
-        int p2_royalty = p2_foul ? 0 : evaluator.get_royalty(p2_top_buf, "top") + evaluator.get_royalty(p2_mid_buf, "middle") + evaluator.get_royalty(p2_bot_buf, "bottom");
+        bool p1_foul = p1_board.is_foul(evaluator);
+        bool p2_foul = p2_board.is_foul(evaluator);
+        int p1_royalty = p1_foul ? 0 : p1_board.get_total_royalty(evaluator);
+        int p2_royalty = p2_foul ? 0 : p2_board.get_total_royalty(evaluator);
 
         if (p1_foul && p2_foul) return {0.0f, 0.0f};
         if (p1_foul) return {-(float)(SCOOP_BONUS + p2_royalty), (float)(SCOOP_BONUS + p2_royalty)};
         if (p2_foul) return {(float)(SCOOP_BONUS + p1_royalty), -(float)(SCOOP_BONUS + p1_royalty)};
 
         int line_score = 0;
-        if (evaluator.evaluate(p1_top_buf) < evaluator.evaluate(p2_top_buf)) line_score++; else line_score--;
-        if (evaluator.evaluate(p1_mid_buf) < evaluator.evaluate(p2_mid_buf)) line_score++; else line_score--;
-        if (evaluator.evaluate(p1_bot_buf) < evaluator.evaluate(p2_bot_buf)) line_score++; else line_score--;
+        CardSet p1_top = p1_board.get_row_cards("top");
+        CardSet p1_mid = p1_board.get_row_cards("middle");
+        CardSet p1_bot = p1_board.get_row_cards("bottom");
+        CardSet p2_top = p2_board.get_row_cards("top");
+        CardSet p2_mid = p2_board.get_row_cards("middle");
+        CardSet p2_bot = p2_board.get_row_cards("bottom");
+
+        if (evaluator.evaluate(p1_top) < evaluator.evaluate(p2_top)) line_score++; else line_score--;
+        if (evaluator.evaluate(p1_mid) < evaluator.evaluate(p2_mid)) line_score++; else line_score--;
+        if (evaluator.evaluate(p1_bot) < evaluator.evaluate(p2_bot)) line_score++; else line_score--;
 
         if (abs(line_score) == 3) line_score = (line_score > 0) ? SCOOP_BONUS : -SCOOP_BONUS;
         float p1_total = (float)(line_score + p1_royalty - p2_royalty);
@@ -165,7 +168,9 @@ namespace ofc {
     void GameState::deal_cards() {
         int num_to_deal = (street_ == 1) ? 5 : 3;
         if (deck_.size() < (size_t)num_to_deal) {
-            street_ = 6; return;
+            street_ = 6; 
+            dealt_cards_.clear();
+            return;
         }
         dealt_cards_.assign(deck_.end() - num_to_deal, deck_.end());
         deck_.resize(deck_.size() - num_to_deal);
