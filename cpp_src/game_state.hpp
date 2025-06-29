@@ -13,6 +13,7 @@
 
 namespace ofc {
 
+    // УЛУЧШЕНО: UndoInfo теперь не хранит копии векторов.
     struct UndoInfo {
         Action action;
         int prev_street;
@@ -33,8 +34,13 @@ namespace ofc {
 
         std::pair<float, float> get_payoffs(const HandEvaluator& evaluator) const;
         
+        // УЛУЧШЕНО: get_legal_actions теперь заполняет вектор по ссылке.
         void get_legal_actions(size_t action_limit, std::vector<Action>& out_actions) const;
+
+        // УЛУЧШЕНО: apply_action теперь заполняет UndoInfo по ссылке.
         void apply_action(const Action& action, int player_view, UndoInfo& undo_info);
+        
+        // УЛУЧШЕНО: undo_action использует новую UndoInfo.
         void undo_action(const UndoInfo& undo_info, int player_view);
         
         int get_street() const { return street_; }
@@ -63,8 +69,5 @@ namespace ofc {
         std::vector<int> opponent_discard_counts_;
         
         mutable std::mt19937 rng_;
-
-        mutable CardSet p1_top_buf, p1_mid_buf, p1_bot_buf;
-        mutable CardSet p2_top_buf, p2_mid_buf, p2_bot_buf;
     };
 }
