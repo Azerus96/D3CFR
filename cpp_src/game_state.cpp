@@ -74,7 +74,7 @@ namespace ofc {
             }
         }
         
-        std::shuffle(actions.begin(), actions.end(), rng_);
+    // std::shuffle(actions.begin(), actions.end(), rng_);
         if (actions.size() > action_limit) {
             actions.resize(action_limit);
         }
