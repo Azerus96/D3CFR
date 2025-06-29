@@ -1,6 +1,7 @@
-// D2CFR-main/cpp_src/game_state.cpp (ВЕРСИЯ 5.0)
+// D2CFR-main/cpp_src/game_state.cpp (ВЕРСИЯ 6.0 - MULTIPROCESSING)
 
 #include "game_state.hpp"
+#include <iostream>
 
 namespace ofc {
 
