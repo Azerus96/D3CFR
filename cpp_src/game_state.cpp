@@ -1,4 +1,4 @@
-// D2CFR-main/cpp_src/game_state.cpp (ФИНАЛЬНАЯ ВЕРСИЯ)
+// D2CFR-main/cpp_src/game_state.cpp (ФИНАЛЬНАЯ ОПТИМИЗИРОВАННАЯ ВЕРСИЯ)
 
 #include "game_state.hpp"
 
