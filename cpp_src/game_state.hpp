@@ -1,3 +1,5 @@
+// D2CFR-main/cpp_src/game_state.hpp (ПОЛНАЯ ВЕРСИЯ ДЛЯ ЭТАПА 1)
+
 #pragma once
 #include "board.hpp"
 #include <vector>
@@ -12,7 +14,7 @@
 
 namespace ofc {
 
-    // ИЗМЕНЕНО: Создаем структуру для хранения "отката" действия
+    // Структура UndoInfo остается без изменений на этом этапе
     struct UndoInfo {
         Action action;
         int prev_street;
@@ -23,19 +25,20 @@ namespace ofc {
     class GameState {
     public:
         GameState(int num_players = 2, int dealer_pos = -1);
-
         GameState(const GameState& other) = default;
+
+        void reset(int dealer_pos = -1);
 
         inline bool is_terminal() const {
             return street_ > 5 || boards_[0].get_card_count() == 13;
         }
 
+        // ИЗМЕНЕНО: get_payoffs теперь не принимает буферы, они будут членами класса
         std::pair<float, float> get_payoffs(const HandEvaluator& evaluator) const;
+        
+        // Остальные public методы без изменений
         std::vector<Action> get_legal_actions(size_t action_limit) const;
-
-        // ИЗМЕНЕНО: apply_action теперь изменяет состояние на месте и возвращает информацию для отката
         UndoInfo apply_action(const Action& action, int player_view);
-        // ИЗМЕНЕНО: Новая функция для отката действия
         void undo_action(const UndoInfo& undo_info, int player_view);
         
         int get_street() const { return street_; }
@@ -47,9 +50,6 @@ namespace ofc {
         int get_opponent_discard_count(int player_idx) const { return opponent_discard_counts_[player_idx]; }
         int get_dealer_pos() const { return dealer_pos_; }
         std::mt19937& get_rng() { return rng_; }
-        public:
-        // ... другие ваши public методы ...
-        void reset(int dealer_pos = -1);
 
     private:
         void deal_cards();
@@ -67,5 +67,9 @@ namespace ofc {
         std::vector<int> opponent_discard_counts_;
         
         mutable std::mt19937 rng_;
+
+        // ДОБАВЛЕНО: приватные члены для переиспользования векторов-буферов
+        mutable CardSet p1_top_buf, p1_mid_buf, p1_bot_buf;
+        mutable CardSet p2_top_buf, p2_mid_buf, p2_bot_buf;
     };
 }
