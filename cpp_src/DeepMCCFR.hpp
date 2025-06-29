@@ -1,4 +1,4 @@
-// D2CFR-main/cpp_src/DeepMCCFR.hpp (ФИНАЛЬНАЯ ВЕРСИЯ)
+// D2CFR-main/cpp_src/DeepMCCFR.hpp (ФИНАЛЬНЫЙ ТЕСТ)
 
 #pragma once
 #include "game_state.hpp"
@@ -8,26 +8,16 @@
 #include <vector>
 #include <map>
 #include <memory>
-#include <thread>
-#include <chrono>
 
 namespace ofc {
-
-struct ProfilingStats {
-    std::chrono::duration<double, std::milli> total_traverse_time{0};
-    std::chrono::duration<double, std::milli> get_legal_actions_time{0};
-    std::chrono::duration<double, std::milli> featurize_time{0};
-    std::chrono::duration<double, std::milli> model_inference_time{0};
-    std::chrono::duration<double, std::milli> buffer_push_time{0};
-    long call_count = 0;
-};
-
 
 class DeepMCCFR {
 public:
     DeepMCCFR(const std::string& model_path, size_t action_limit, SharedReplayBuffer* buffer);
     
-    std::vector<double> run_traversal_for_profiling();
+    // Упрощенный метод для профайлинга, который ничего не возвращает.
+    // Мы будем измерять время и количество сэмплов на стороне Python.
+    void run_traversal();
 
 private:
     HandEvaluator evaluator_;
@@ -36,8 +26,9 @@ private:
     SharedReplayBuffer* replay_buffer_; 
     size_t action_limit_;
 
-    std::map<int, float> traverse(GameState& state, int traversing_player, ProfilingStats& stats);
+    // Убираем stats, он нам больше не нужен
+    std::map<int, float> traverse(GameState& state, int traversing_player);
     std::vector<float> featurize(const GameState& state, int player_view);
 };
 
-} // namespace ofc
+}
