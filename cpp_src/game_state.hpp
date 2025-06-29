@@ -1,4 +1,4 @@
-// D2CFR-main/cpp_src/game_state.hpp (ВЕРСИЯ 5.0)
+// D2CFR-main/cpp_src/game_state.hpp (ВЕРСИЯ 6.0 - MULTIPROCESSING)
 
 #pragma once
 #include "board.hpp"
@@ -28,6 +28,7 @@ namespace ofc {
         }
 
         std::pair<float, float> get_payoffs(const HandEvaluator& evaluator) const;
+        
         void get_legal_actions(size_t action_limit, std::vector<Action>& out_actions) const;
         void apply_action(const Action& action, int player_view, UndoInfo& undo_info);
         void undo_action(const UndoInfo& undo_info, int player_view);
