@@ -1,4 +1,4 @@
-// D2CFR-main/cpp_src/game_state.hpp (ФИНАЛЬНАЯ ОПТИМИЗИРОВАННАЯ ВЕРСИЯ)
+// D2CFR-main/cpp_src/game_state.hpp (ВЕРСИЯ 5.0)
 
 #pragma once
 #include "board.hpp"
@@ -6,14 +6,11 @@
 #include <random>
 #include <numeric>
 #include <algorithm>
-#include <iostream>
-#include <functional>
 #include <map>
 #include <string>
 
 namespace ofc {
 
-    // УЛУЧШЕНО: UndoInfo теперь не хранит полные копии векторов.
     struct UndoInfo {
         Action action;
         int prev_street;
@@ -24,8 +21,6 @@ namespace ofc {
     class GameState {
     public:
         GameState(int num_players = 2, int dealer_pos = -1);
-        GameState(const GameState& other) = default;
-
         void reset(int dealer_pos = -1);
 
         inline bool is_terminal() const {
@@ -33,14 +28,8 @@ namespace ofc {
         }
 
         std::pair<float, float> get_payoffs(const HandEvaluator& evaluator) const;
-        
-        // УЛУЧШЕНО: get_legal_actions теперь заполняет вектор по ссылке.
         void get_legal_actions(size_t action_limit, std::vector<Action>& out_actions) const;
-
-        // УЛУЧШЕНО: apply_action теперь заполняет UndoInfo по ссылке.
         void apply_action(const Action& action, int player_view, UndoInfo& undo_info);
-        
-        // УЛУЧШЕНО: undo_action использует новую UndoInfo.
         void undo_action(const UndoInfo& undo_info, int player_view);
         
         int get_street() const { return street_; }
@@ -64,10 +53,8 @@ namespace ofc {
         std::vector<Board> boards_;
         CardSet deck_;
         CardSet dealt_cards_;
-        
         std::vector<CardSet> my_discards_;
         std::vector<int> opponent_discard_counts_;
-        
         mutable std::mt19937 rng_;
     };
 }
