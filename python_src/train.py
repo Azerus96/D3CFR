@@ -1,4 +1,4 @@
-# D2CFR-main/python_src/train.py (ВЕРСИЯ 6.0 - MULTIPROCESSING)
+# D2CFR-main/python_src/train.py (ВЕРСИЯ ДЛЯ КОРРЕКТНОГО СРАВНЕНИЯ)
 
 import os
 import time
@@ -11,10 +11,11 @@ import traceback
 from multiprocessing import Process, Queue, cpu_count
 from collections import deque
 import sys
+import concurrent.futures
 
-# --- ГЛОБАЛЬНЫЙ КОНТРОЛЬ НАД ПОТОКАМИ ---
-# Эти переменные будут использоваться каждым дочерним процессом
-NUM_COMPUTATION_THREADS = "1" 
+# --- НАСТРОЙКИ, ИДЕНТИЧНЫЕ ИСХОДНОМУ ТЕСТУ ---
+NUM_WORKERS = 24
+NUM_COMPUTATION_THREADS = "4"
 os.environ['OMP_NUM_THREADS'] = NUM_COMPUTATION_THREADS
 os.environ['OPENBLAS_NUM_THREADS'] = NUM_COMPUTATION_THREADS
 os.environ['MKL_NUM_THREADS'] = NUM_COMPUTATION_THREADS
@@ -22,38 +23,31 @@ os.environ['VECLIB_MAXIMUM_THREADS'] = NUM_COMPUTATION_THREADS
 os.environ['NUMEXPR_NUM_THREADS'] = NUM_COMPUTATION_THREADS
 torch.set_num_threads(int(NUM_COMPUTATION_THREADS))
 
-# --- ГИПЕРПАРАМЕТРЫ ---
+# --- ГИПЕРПАРАМЕТРЫ, ИДЕНТИЧНЫЕ ИСХОДНОМУ ТЕСТУ ---
 INPUT_SIZE = 1486 
-ACTION_LIMIT = 16
+ACTION_LIMIT = 4
 LEARNING_RATE = 0.001
-REPLAY_BUFFER_CAPACITY = 1000000
-BATCH_SIZE = 4096
-SAVE_INTERVAL_SECONDS = 600 
+REPLAY_BUFFER_CAPACITY = 2000000
+BATCH_SIZE = 256
+TRAINING_BLOCK_SIZE = 48
 MODEL_PATH = "d2cfr_model.pth"
 TORCHSCRIPT_MODEL_PATH = "d2cfr_model_script.pt"
-# Используем на 2 меньше, чтобы оставить ресурсы для основного процесса и ОС
-NUM_WORKERS = max(1, cpu_count() - 2)
 
-# Поздний импорт, чтобы переменные окружения успели установиться
+# Поздний импорт
 from .model import DuelingNetwork
 
-def worker_process(model_path, action_limit, queue, build_path):
+def worker_process(model_path, action_limit, queue, build_path, num_traversals):
     """
-    Эта функция выполняется в каждом отдельном процессе.
+    Функция воркера. Выполняет заданное число траверсов и завершается.
     """
-    # Добавляем путь к скомпилированному модулю
     if build_path not in sys.path:
         sys.path.insert(0, build_path)
-        
+    
     try:
         from ofc_engine import DeepMCCFR
-        # Каждый процесс создает свой собственный экземпляр движка
         solver = DeepMCCFR(model_path, action_limit, queue)
-        while True:
+        for _ in range(num_traversals):
             solver.run_traversal()
-    except KeyboardInterrupt:
-        # Просто выходим, если основной процесс прерван
-        pass
     except Exception as e:
         print(f"Error in worker process (PID: {os.getpid()}): {e}")
         traceback.print_exc()
@@ -61,96 +55,69 @@ def worker_process(model_path, action_limit, queue, build_path):
 def main():
     device = torch.device("cpu")
     print(f"Main process (PID: {os.getpid()}) using device: {device}", flush=True)
-    print(f"Starting {NUM_WORKERS} worker processes...", flush=True)
+    print(f"--- CORRECTED FINAL TEST: Comparing Architectures ---", flush=True)
+    print(f"Settings: NUM_WORKERS={NUM_WORKERS}, ACTION_LIMIT={ACTION_LIMIT}, TRAINING_BLOCK_SIZE={TRAINING_BLOCK_SIZE}")
 
     model = DuelingNetwork(input_size=INPUT_SIZE, max_actions=ACTION_LIMIT).to(device)
-    
-    if os.path.exists(MODEL_PATH):
-        print(f"Found existing model at {MODEL_PATH}. Attempting to transfer weights...")
-        try:
-            old_state_dict = torch.load(MODEL_PATH, map_location=device)
-            new_state_dict = model.state_dict()
-            loaded_count = 0
-            mismatched_layers = []
-            for name, param in old_state_dict.items():
-                if name in new_state_dict and new_state_dict[name].shape == param.shape:
-                    new_state_dict[name].copy_(param)
-                    loaded_count += 1
-                else:
-                    mismatched_layers.append(name)
-            model.load_state_dict(new_state_dict)
-            print(f"Weight transfer complete. Loaded {loaded_count} layers. Skipped: {mismatched_layers}")
-        except Exception as e:
-            print(f"Could not perform weight transfer: {e}. Starting from scratch.", flush=True)
-    else:
-        print(f"No model found at {MODEL_PATH}. Starting training from scratch.", flush=True)
-
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
     criterion = nn.MSELoss()
 
-    # --- Квантование и сохранение модели для воркеров ---
-    def save_quantized_model(model_to_quantize, path):
-        print("\nQuantizing and saving model for workers...", flush=True)
-        model_to_quantize.to('cpu')
-        model_to_quantize.eval()
-        quantized_model = torch.quantization.quantize_dynamic(
-            model_to_quantize, {torch.nn.Linear}, dtype=torch.qint8
-        )
-        traced_script_module = torch.jit.trace(quantized_model, torch.randn(1, INPUT_SIZE))
-        traced_script_module.save(path)
-        print(f"Quantized model saved to {path}", flush=True)
+    # --- Квантование и сохранение модели ---
+    print("\nQuantizing and saving model for workers...", flush=True)
+    model.eval()
+    quantized_model = torch.quantization.quantize_dynamic(model, {torch.nn.Linear}, dtype=torch.qint8)
+    traced_script_module = torch.jit.trace(quantized_model, torch.randn(1, INPUT_SIZE))
+    traced_script_module.save(TORCHSCRIPT_MODEL_PATH)
+    print(f"Quantized model saved to {TORCHSCRIPT_MODEL_PATH}", flush=True)
 
-    save_quantized_model(model, TORCHSCRIPT_MODEL_PATH)
-
-    data_queue = Queue()
+    # --- Основной цикл, имитирующий старую структуру ---
     replay_buffer = deque(maxlen=REPLAY_BUFFER_CAPACITY)
-
-    # --- Запуск процессов-воркеров ---
-    build_path = os.path.abspath("./build")
-    processes = []
-    for _ in range(NUM_WORKERS):
-        p = Process(target=worker_process, args=(TORCHSCRIPT_MODEL_PATH, ACTION_LIMIT, data_queue, build_path))
-        p.daemon = True # Процессы завершатся, если основной умрет
-        p.start()
-        processes.append(p)
-
-    last_save_time = time.time()
-    total_samples = 0
-    block_counter = 0
+    total_traversals = 0
+    
     try:
-        while True:
-            block_counter += 1
+        for block_counter in range(1, 3): # Запустим 2 блока для надежности
             print(f"\n--- Block {block_counter} ---", flush=True)
             
-            # --- Сбор данных ---
-            start_collection_time = time.time()
-            
-            # Собираем данные, пока не наберем достаточно для батча
-            while data_queue.qsize() < BATCH_SIZE and len(replay_buffer) < BATCH_SIZE:
-                time.sleep(0.5)
-                print(f"Waiting for data... Queue size: {data_queue.qsize()}", flush=True)
+            data_queue = Queue()
+            start_time = time.time()
+            initial_buffer_size = len(replay_buffer)
 
-            samples_in_block = 0
+            # --- Запуск процессов-воркеров для одного блока ---
+            processes = []
+            tasks_per_worker = TRAINING_BLOCK_SIZE // NUM_WORKERS
+            build_path = os.path.abspath("./build")
+            
+            print(f"Submitting {TRAINING_BLOCK_SIZE} traversal tasks ({tasks_per_worker} per worker)...", flush=True)
+            for _ in range(NUM_WORKERS):
+                p = Process(target=worker_process, args=(TORCHSCRIPT_MODEL_PATH, ACTION_LIMIT, data_queue, build_path, tasks_per_worker))
+                p.start()
+                processes.append(p)
+
+            # Ждем завершения всех процессов
+            for p in processes:
+                p.join()
+
+            # --- Сбор данных из очереди ---
+            samples_generated = 0
             while not data_queue.empty():
-                sample = data_queue.get()
+                sample = data_queue.get_nowait()
                 replay_buffer.append(sample)
-                samples_in_block += 1
-            
-            total_samples += samples_in_block
-            collection_time = time.time() - start_collection_time
-            samples_per_sec = samples_in_block / collection_time if collection_time > 0 else float('inf')
-            
-            print(f"Collected {samples_in_block} new samples. Throughput: {samples_per_sec:.2f} samples/s. Buffer size: {len(replay_buffer)}", flush=True)
+                samples_generated += 1
 
-            # --- Обучение ---
+            total_traversals += TRAINING_BLOCK_SIZE
+            collection_time = time.time() - start_time
+            
+            print(f"Data collection finished. Buffer size: {len(replay_buffer)}. Samples generated: {samples_generated}", flush=True)
+
             if len(replay_buffer) < BATCH_SIZE:
+                print("Buffer too small, skipping training.", flush=True)
                 continue
 
+            # --- Обучение ---
             indices = np.random.choice(len(replay_buffer), BATCH_SIZE, replace=False)
             minibatch = [replay_buffer[i] for i in indices]
-            
             infosets, regrets, _ = zip(*minibatch)
-
+            
             infosets_tensor = torch.tensor(infosets, dtype=torch.float32).to(device)
             targets_tensor = torch.tensor(regrets, dtype=torch.float32).to(device)
 
@@ -162,28 +129,14 @@ def main():
             clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             
-            print(f"Training step complete. Loss: {loss.item():.6f}", flush=True)
-
-            # --- Сохранение ---
-            if time.time() - last_save_time > SAVE_INTERVAL_SECONDS:
-                print("\n--- Saving models ---", flush=True)
-                torch.save(model.state_dict(), MODEL_PATH)
-                save_quantized_model(model, TORCHSCRIPT_MODEL_PATH)
-                last_save_time = time.time()
-                print("--- Models saved ---", flush=True)
+            samples_per_sec = samples_generated / collection_time if collection_time > 0 else 0
+            
+            print(f"Block {block_counter} | Total: {total_traversals} | Loss: {loss.item():.6f} | Throughput: {samples_per_sec:.2f} samples/s", flush=True)
 
     except KeyboardInterrupt:
         print("\nTraining interrupted by user.", flush=True)
     finally:
-        print("Terminating worker processes...")
-        for p in processes:
-            if p.is_alive():
-                p.terminate()
-            p.join(timeout=5)
-        print("Saving final models...")
-        torch.save(model.state_dict(), "d2cfr_model_final.pth")
-        save_quantized_model(model, "d2cfr_model_script_final.pt")
-        print("Training finished.", flush=True)
+        print("\nTest finished.")
 
 if __name__ == "__main__":
     main()
