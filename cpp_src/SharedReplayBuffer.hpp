@@ -1,5 +1,3 @@
-// D2CFR-main/cpp_src/SharedReplayBuffer.hpp (ФИНАЛЬНАЯ КОРРЕКТНАЯ ВЕРСИЯ)
-
 #pragma once
 
 #include <vector>
@@ -8,10 +6,11 @@
 #include <algorithm>
 #include <iostream>
 #include <mutex>
+#include "constants.hpp" // <-- ИЗМЕНЕНО
 
 namespace ofc {
 
-constexpr int INFOSET_SIZE = 1486;
+// УДАЛЕНО: constexpr int INFOSET_SIZE = 1486;
 
 struct TrainingSample {
     std::vector<float> infoset_vector;
@@ -47,7 +46,6 @@ public:
         std::fill(sample.target_regrets.begin(), sample.target_regrets.end(), 0.0f);
         
         if (num_actions > 0) {
-            // Копируем только num_actions элементов, так как regrets_vec имеет такой размер
             std::copy(regrets_vec.begin(), regrets_vec.end(), sample.target_regrets.begin());
         }
         sample.num_actions = num_actions;
@@ -61,7 +59,6 @@ public:
         std::lock_guard<std::mutex> lock(mtx_);
         
         if (count_ < static_cast<uint64_t>(batch_size)) {
-            // Если данных не хватает, заполняем нулями, чтобы избежать падения в Python
             std::fill(out_infosets, out_infosets + batch_size * INFOSET_SIZE, 0.0f);
             std::fill(out_regrets, out_regrets + batch_size * action_limit_, 0.0f);
             return;
