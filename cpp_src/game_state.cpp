@@ -1,12 +1,10 @@
-// D2CFR-main/cpp_src/game_state.cpp (ВЕРСИЯ 5.0)
-
 #include "game_state.hpp"
 #include <iostream>
 
 namespace ofc {
 
     GameState::GameState(int num_players, int dealer_pos)
-        : rng_(std::random_device{}()), num_players_(num_players) {
+        : num_players_(num_players) {
         deck_.reserve(52);
         dealt_cards_.reserve(5);
         my_discards_.resize(num_players);
@@ -23,12 +21,16 @@ namespace ofc {
             board.middle.fill(INVALID_CARD);
             board.bottom.fill(INVALID_CARD);
         }
+        
+        // ИЗМЕНЕНО: Используем временный RNG только для сброса
+        std::mt19937 temp_rng(std::random_device{}());
         deck_.resize(52);
         std::iota(deck_.begin(), deck_.end(), 0);
-        std::shuffle(deck_.begin(), deck_.end(), rng_);
+        std::shuffle(deck_.begin(), deck_.end(), temp_rng);
+        
         if (dealer_pos == -1) {
             std::uniform_int_distribution<int> dist(0, num_players_ - 1);
-            dealer_pos_ = dist(rng_);
+            dealer_pos_ = dist(temp_rng);
         } else {
             this->dealer_pos_ = dealer_pos;
         }
@@ -70,7 +72,8 @@ namespace ofc {
         return {p1_total, -p1_total};
     }
 
-    void GameState::get_legal_actions(size_t action_limit, std::vector<Action>& out_actions) const {
+    // ИЗМЕНЕНО: Принимает и использует RNG
+    void GameState::get_legal_actions(size_t action_limit, std::vector<Action>& out_actions, std::mt19937& rng) const {
         out_actions.clear();
         if (is_terminal()) return;
 
@@ -78,7 +81,7 @@ namespace ofc {
         cards_to_place.reserve(5);
         if (street_ == 1) {
             cards_to_place = dealt_cards_;
-            generate_random_placements(cards_to_place, INVALID_CARD, out_actions, action_limit);
+            generate_random_placements(cards_to_place, INVALID_CARD, out_actions, action_limit, rng);
         } else {
             size_t limit_per_discard = action_limit > 0 ? (action_limit / 3 + 1) : 0;
             for (int i = 0; i < 3; ++i) {
@@ -87,11 +90,11 @@ namespace ofc {
                 for (int j = 0; j < 3; ++j) {
                     if (i != j) cards_to_place.push_back(dealt_cards_[j]);
                 }
-                generate_random_placements(cards_to_place, current_discarded, out_actions, limit_per_discard);
+                generate_random_placements(cards_to_place, current_discarded, out_actions, limit_per_discard, rng);
             }
         }
         
-        std::shuffle(out_actions.begin(), out_actions.end(), rng_);
+        std::shuffle(out_actions.begin(), out_actions.end(), rng);
         if (action_limit > 0 && out_actions.size() > action_limit) {
             out_actions.resize(action_limit);
         }
@@ -171,7 +174,8 @@ namespace ofc {
         deck_.resize(deck_.size() - num_to_deal);
     }
 
-    void GameState::generate_random_placements(const CardSet& cards, Card discarded, std::vector<Action>& actions, size_t limit) const {
+    // ИЗМЕНЕНО: Принимает и использует RNG
+    void GameState::generate_random_placements(const CardSet& cards, Card discarded, std::vector<Action>& actions, size_t limit, std::mt19937& rng) const {
         const Board& board = boards_[current_player_];
         std::vector<std::pair<std::string, int>> available_slots;
         available_slots.reserve(13);
@@ -189,8 +193,8 @@ namespace ofc {
         current_placement.reserve(k);
 
         for (size_t i = 0; i < limit; ++i) {
-            std::shuffle(temp_cards.begin(), temp_cards.end(), rng_);
-            std::shuffle(temp_slots.begin(), temp_slots.end(), rng_);
+            std::shuffle(temp_cards.begin(), temp_cards.end(), rng);
+            std::shuffle(temp_slots.begin(), temp_slots.end(), rng);
 
             current_placement.clear();
             for(size_t j = 0; j < k; ++j) {
