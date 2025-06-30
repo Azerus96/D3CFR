@@ -1,19 +1,23 @@
-// D2CFR-main/cpp_src/DeepMCCFR.cpp (ВЕРСИЯ 6.0 - MULTIPROCESSING)
+// D2CFR-main/cpp_src/DeepMCCFR.cpp (ВЕРСИЯ ДЛЯ ИЗМЕРЕНИЯ ИНИЦИАЛИЗАЦИИ)
 
 #include "DeepMCCFR.hpp"
-#include <pybind11/stl.h>
 #include <stdexcept>
 #include <iostream>
 #include <numeric>
 #include <algorithm>
 #include <torch/torch.h>
-
-namespace py = pybind11;
+#include <chrono>
+#include <thread>
+#include <sstream>
 
 namespace ofc {
 
-DeepMCCFR::DeepMCCFR(const std::string& model_path, size_t action_limit, py::object queue) 
-    : action_limit_(action_limit), device_(torch::kCPU), queue_(queue) {
+DeepMCCFR::DeepMCCFR(const std::string& model_path, size_t action_limit, SharedReplayBuffer* buffer) 
+    : action_limit_(action_limit), device_(torch::kCPU), replay_buffer_(buffer) {
+    
+    // --- НАЧАЛО ЗАМЕРА ---
+    auto start_time = std::chrono::high_resolution_clock::now();
+    
     try {
         model_ = torch::jit::load(model_path);
         model_.eval();
@@ -21,11 +25,15 @@ DeepMCCFR::DeepMCCFR(const std::string& model_path, size_t action_limit, py::obj
     } catch (const c10::Error& e) {
         throw std::runtime_error("Failed to load LibTorch model: " + std::string(e.what()));
     }
-}
-
-void DeepMCCFR::push_to_queue(const std::vector<float>& infoset, const std::vector<float>& regrets, int num_actions) {
-    py::gil_scoped_acquire acquire;
-    queue_.attr("put")(py::make_tuple(infoset, regrets, num_actions));
+    
+    // --- КОНЕЦ ЗАМЕРА И ВЫВОД ---
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+    
+    std::stringstream ss;
+    ss << "C++: Thread " << std::this_thread::get_id() 
+       << " loaded model in " << duration << " ms." << std::endl;
+    std::cout << ss.str();
 }
 
 void DeepMCCFR::run_traversal() {
@@ -150,7 +158,7 @@ std::map<int, float> DeepMCCFR::traverse(GameState& state, int traversing_player
         true_regrets[i] = action_utils[i][current_player] - node_util[current_player];
     }
     
-    push_to_queue(infoset_vec, true_regrets, num_actions);
+    replay_buffer_->push(infoset_vec, true_regrets, num_actions);
 
     return node_util;
 }
