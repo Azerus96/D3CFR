@@ -1,4 +1,4 @@
-# D2CFR-main/python_src/train.py (ФИНАЛЬНАЯ РАБОЧАЯ ВЕРСИЯ)
+# D2CFR-main/python_src/train.py (ФИНАЛЬНАЯ РАБОЧАЯ ВЕРСИЯ - ИСПРАВЛЕННАЯ)
 
 import os
 import time
@@ -31,9 +31,9 @@ LEARNING_RATE = 0.001
 REPLAY_BUFFER_CAPACITY = 2000000
 BATCH_SIZE = 256
 # Параметры цикла
-DATA_COLLECTION_SECONDS = 15 # Собираем данные 15 секунд
-TRAINING_STEPS_PER_BLOCK = 5 # Делаем 5 шагов обучения после сбора
-SAVE_INTERVAL_BLOCKS = 1000 
+DATA_COLLECTION_SECONDS = 15 
+TRAINING_STEPS_PER_BLOCK = 5 
+SAVE_INTERVAL_BLOCKS = 1000
 
 MODEL_PATH = "d2cfr_model.pth"
 TORCHSCRIPT_MODEL_PATH = "d2cfr_model_script.pt"
@@ -45,18 +45,31 @@ def worker_run(solver, stop_event):
             solver.run_traversal()
         except Exception as e:
             print(f"Error in worker thread: {e}")
-            # Если воркер упал, он просто перестанет работать
             break
 
 def main():
     device = torch.device("cpu")
     model = DuelingNetwork(input_size=INPUT_SIZE, max_actions=ACTION_LIMIT).to(device)
     
-    # ... (логика загрузки весов, как раньше) ...
+    # ИСПРАВЛЕНО: Добавлен отступ в блоке try/except
     if os.path.exists(MODEL_PATH):
         print(f"Found existing model at {MODEL_PATH}. Attempting to transfer weights...")
         try:
-            # ... (код загрузки весов) ...
+            old_state_dict = torch.load(MODEL_PATH, map_location=device)
+            new_state_dict = model.state_dict()
+            
+            loaded_count = 0
+            mismatched_layers = []
+            
+            for name, param in old_state_dict.items():
+                if name in new_state_dict and new_state_dict[name].shape == param.shape:
+                    new_state_dict[name].copy_(param)
+                    loaded_count += 1
+                else:
+                    mismatched_layers.append(name)
+            
+            model.load_state_dict(new_state_dict)
+            print(f"Weight transfer complete. Loaded {loaded_count} layers. Skipped: {mismatched_layers}")
         except Exception as e:
             print(f"Could not perform weight transfer: {e}. Starting from scratch.", flush=True)
     else:
@@ -81,7 +94,6 @@ def main():
             traced_script_module = torch.jit.trace(quantized_model, torch.randn(1, INPUT_SIZE))
             traced_script_module.save(TORCHSCRIPT_MODEL_PATH)
 
-            # Создаем новые солверы, которые загрузят обновленную модель
             solvers = [DeepMCCFR(TORCHSCRIPT_MODEL_PATH, ACTION_LIMIT, replay_buffer) for _ in range(NUM_WORKERS)]
             
             print(f"Starting data collection for {DATA_COLLECTION_SECONDS} seconds...", flush=True)
@@ -90,11 +102,8 @@ def main():
             
             start_time = time.time()
             with ThreadPoolExecutor(max_workers=NUM_WORKERS) as executor:
-                # Запускаем воркеры
                 futures = [executor.submit(worker_run, solver, stop_event) for solver in solvers]
-                # Ждем нужное время
                 time.sleep(DATA_COLLECTION_SECONDS)
-                # Посылаем сигнал остановки
                 stop_event.set()
             
             duration = time.time() - start_time
