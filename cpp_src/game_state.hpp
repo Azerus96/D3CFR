@@ -1,4 +1,4 @@
-// D2CFR-main/cpp_src/game_state.hpp (ВЕРСИЯ 6.0 - MULTIPROCESSING)
+// D2CFR-main/cpp_src/game_state.hpp (ВЕРСИЯ 5.0)
 
 #pragma once
 #include "board.hpp"
