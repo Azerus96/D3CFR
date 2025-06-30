@@ -1,4 +1,4 @@
-// D2CFR-main/cpp_src/game_state.cpp (ВЕРСИЯ 6.0 - MULTIPROCESSING)
+// D2CFR-main/cpp_src/game_state.cpp (ВЕРСИЯ 5.0)
 
 #include "game_state.hpp"
 #include <iostream>
