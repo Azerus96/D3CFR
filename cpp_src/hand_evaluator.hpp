@@ -1,4 +1,4 @@
-// D2CFR-main/cpp_src/hand_evaluator.hpp (ВЕРСИЯ 6.0 - MULTIPROCESSING)
+// D2CFR-main/cpp_src/hand_evaluator.hpp (ВЕРСИЯ 5.0)
 
 #pragma once
 #include "card.hpp"
@@ -87,12 +87,10 @@ namespace ofc {
         std::array<HandRank, 2197> evaluator_3_card_lookup_;
 
         void init_3_card_lookup() {
-            // Trips (e.g., AAA, KKK)
             for (int r = 0; r <= 12; ++r) {
                 int key = r * 169 + r * 13 + r;
                 evaluator_3_card_lookup_[key] = {1000 + (12-r), 6, "Trips"};
             }
-            // Pairs (e.g., AAK, AAQ)
             int rank_val = 2000;
             for (int p = 12; p >= 0; --p) {
                 for (int k = 12; k >= 0; --k) {
@@ -103,7 +101,6 @@ namespace ofc {
                     evaluator_3_card_lookup_[key] = {rank_val++, 8, "Pair"};
                 }
             }
-            // High Card (e.g., AKJ, QJT)
             rank_val = 3000;
             for (int r1 = 12; r1 >= 2; --r1) {
                 for (int r2 = r1 - 1; r2 >= 1; --r2) {
