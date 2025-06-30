@@ -1,19 +1,17 @@
-// D2CFR-main/cpp_src/DeepMCCFR.hpp (ВЕРСИЯ 7.0)
-
 #pragma once
 #include "game_state.hpp"
 #include "hand_evaluator.hpp"
 #include "SharedReplayBuffer.hpp"
-#include "InferenceQueue.hpp" // <-- Подключаем новый файл
+#include "InferenceQueue.hpp"
 #include <vector>
 #include <map>
 #include <memory>
+#include <random> // <-- ДОБАВЛЕНО
 
 namespace ofc {
 
 class DeepMCCFR {
 public:
-    // Конструктор теперь принимает указатели на общие ресурсы
     DeepMCCFR(size_t action_limit, SharedReplayBuffer* buffer, InferenceQueue* queue);
     
     void run_traversal();
@@ -21,8 +19,9 @@ public:
 private:
     HandEvaluator evaluator_;
     SharedReplayBuffer* replay_buffer_; 
-    InferenceQueue* inference_queue_; // <-- Указатель на очередь инференса
+    InferenceQueue* inference_queue_;
     size_t action_limit_;
+    std::mt19937 rng_; // <-- RNG теперь здесь, для каждого воркера свой
 
     std::map<int, float> traverse(GameState& state, int traversing_player);
     std::vector<float> featurize(const GameState& state, int player_view);
