@@ -1,4 +1,4 @@
-// D2CFR-main/cpp_src/DeepMCCFR.cpp (ВЕРСИЯ ДЛЯ ИЗМЕРЕНИЯ ИНИЦИАЛИЗАЦИИ)
+// D2CFR-main/cpp_src/DeepMCCFR.cpp (ВЕРСИЯ ДЛЯ ТЕСТА ПАКЕТНОГО ИНФЕРЕНСА)
 
 #include "DeepMCCFR.hpp"
 #include <stdexcept>
@@ -6,18 +6,12 @@
 #include <numeric>
 #include <algorithm>
 #include <torch/torch.h>
-#include <chrono>
-#include <thread>
-#include <sstream>
 
 namespace ofc {
 
+// Конструктор остается без изменений, модель загружается, но не будет использоваться
 DeepMCCFR::DeepMCCFR(const std::string& model_path, size_t action_limit, SharedReplayBuffer* buffer) 
     : action_limit_(action_limit), device_(torch::kCPU), replay_buffer_(buffer) {
-    
-    // --- НАЧАЛО ЗАМЕРА ---
-    auto start_time = std::chrono::high_resolution_clock::now();
-    
     try {
         model_ = torch::jit::load(model_path);
         model_.eval();
@@ -25,15 +19,6 @@ DeepMCCFR::DeepMCCFR(const std::string& model_path, size_t action_limit, SharedR
     } catch (const c10::Error& e) {
         throw std::runtime_error("Failed to load LibTorch model: " + std::string(e.what()));
     }
-    
-    // --- КОНЕЦ ЗАМЕРА И ВЫВОД ---
-    auto end_time = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
-    
-    std::stringstream ss;
-    ss << "C++: Thread " << std::this_thread::get_id() 
-       << " loaded model in " << duration << " ms." << std::endl;
-    std::cout << ss.str();
 }
 
 void DeepMCCFR::run_traversal() {
@@ -43,6 +28,7 @@ void DeepMCCFR::run_traversal() {
     traverse(state, 1);
 }
 
+// featurize остается без изменений
 std::vector<float> DeepMCCFR::featurize(const GameState& state, int player_view) {
     const Board& my_board = state.get_player_board(player_view);
     const Board& opp_board = state.get_opponent_board(player_view);
@@ -116,16 +102,11 @@ std::map<int, float> DeepMCCFR::traverse(GameState& state, int traversing_player
 
     std::vector<float> infoset_vec = featurize(state, traversing_player);
     
-    std::vector<float> regrets;
-    {
-        torch::NoGradGuard no_grad;
-        auto options = torch::TensorOptions().dtype(torch::kFloat32);
-        torch::Tensor input_tensor = torch::from_blob(infoset_vec.data(), {1, (long)infoset_vec.size()}, options).to(device_);
-        std::vector<torch::jit::IValue> inputs;
-        inputs.push_back(input_tensor);
-        at::Tensor output_tensor = model_.forward(inputs).toTensor();
-        regrets.assign(output_tensor.data_ptr<float>(), output_tensor.data_ptr<float>() + num_actions);
-    }
+    // --- ЗАГЛУШКА ВМЕСТО ИНФЕРЕНСА ---
+    // Мы не вызываем модель, а просто создаем вектор с нулями.
+    // Это имитирует получение результата без затрат времени на вычисления.
+    std::vector<float> regrets(num_actions, 0.0f);
+    // ------------------------------------
 
     std::vector<float> strategy(num_actions);
     float total_positive_regret = 0.0f;
