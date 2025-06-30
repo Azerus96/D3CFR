@@ -1,5 +1,3 @@
-// D2CFR-main/cpp_src/InferenceQueue.hpp (НОВЫЙ ФАЙЛ)
-
 #pragma once
 #include <vector>
 #include <future>
@@ -27,11 +25,13 @@ public:
     // Забирает все запросы из очереди, не блокируя
     std::vector<InferenceRequest> pop_all() {
         std::vector<InferenceRequest> requests;
-        std::unique_lock<std::mutex> lock(mtx_);
-        if (!queue_.empty()) {
-            requests.reserve(queue_.size());
-            std::move(queue_.begin(), queue_.end(), std::back_inserter(requests));
-            queue_.clear();
+        {
+            std::unique_lock<std::mutex> lock(mtx_);
+            if (!queue_.empty()) {
+                requests.reserve(queue_.size());
+                std::move(queue_.begin(), queue_.end(), std::back_inserter(requests));
+                queue_.clear();
+            }
         }
         return requests;
     }
