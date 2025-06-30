@@ -1,4 +1,4 @@
-# D2CFR-main/python_src/train.py (ВЕРСИЯ ДЛЯ ИЗМЕРЕНИЯ ИНИЦИАЛИЗАЦИИ - ПОЛНАЯ)
+# D2CFR-main/python_src/train.py (ВЕРСИЯ ДЛЯ ТЕСТА ПАКЕТНОГО ИНФЕРЕНСА)
 
 import os
 import time
@@ -8,7 +8,7 @@ import numpy as np
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
 
-# --- НАСТРОЙКИ, ИДЕНТИЧНЫЕ ИСХОДНОМУ ТЕСТУ ---
+# --- НАСТРОЙКИ ---
 NUM_WORKERS = 24
 NUM_COMPUTATION_THREADS = "4"
 os.environ['OMP_NUM_THREADS'] = NUM_COMPUTATION_THREADS
@@ -21,78 +21,111 @@ torch.set_num_threads(int(NUM_COMPUTATION_THREADS))
 from .model import DuelingNetwork
 from ofc_engine import DeepMCCFR, SharedReplayBuffer
 
-# --- ГИПЕРПАРАМЕТРЫ, ИДЕНТИЧНЫЕ ИСХОДНОМУ ТЕСТУ ---
+# --- ГИПЕРПАРАМЕТРЫ ---
 INPUT_SIZE = 1486 
-# ВАЖНО: Используем ACTION_LIMIT=4 для прямого сравнения с самым первым тестом
 ACTION_LIMIT = 4
-LEARNING_RATE = 0.001
 REPLAY_BUFFER_CAPACITY = 2000000
-BATCH_SIZE = 256
-TRAINING_BLOCK_SIZE = 48
-MODEL_PATH = "d2cfr_model.pth"
+# Запускаем сбор данных на фиксированное время
+DATA_COLLECTION_SECONDS = 10 
+# Размер батча для теста инференса
+INFERENCE_BATCH_SIZE = 256
+
 TORCHSCRIPT_MODEL_PATH = "d2cfr_model_script.pt"
 
 def main():
     device = torch.device("cpu")
     model = DuelingNetwork(input_size=INPUT_SIZE, max_actions=ACTION_LIMIT).to(device)
     
-    print("--- PROFILING INITIALIZATION TIME ---")
-    print("Saving model to disk...", flush=True)
+    print("--- BATCH INFERENCE PERFORMANCE TEST ---")
+    
+    # --- Квантование модели для максимальной скорости ---
+    print("\nQuantizing model for faster CPU inference...", flush=True)
     model.eval()
+    quantized_model = torch.quantization.quantize_dynamic(
+        model, {torch.nn.Linear}, dtype=torch.qint8
+    )
+    print("Model quantization complete.", flush=True)
+    
+    # Сохраняем неквантованную модель, так как C++ код ее все равно не использует
     traced_script_module = torch.jit.trace(model, torch.randn(1, INPUT_SIZE))
     traced_script_module.save(TORCHSCRIPT_MODEL_PATH)
-    print("Model saved.", flush=True)
 
     replay_buffer = SharedReplayBuffer(REPLAY_BUFFER_CAPACITY, ACTION_LIMIT)
+    solvers = [DeepMCCFR(TORCHSCRIPT_MODEL_PATH, ACTION_LIMIT, replay_buffer) for _ in range(NUM_WORKERS)]
 
-    # --- ЭКСПЕРИМЕНТ 1: ПОСЛЕДОВАТЕЛЬНАЯ ИНИЦИАЛИЗАЦИЯ ---
-    print("\n--- Test 1: Sequential Initialization ---", flush=True)
-    start_seq = time.time()
-    solvers_seq = [DeepMCCFR(TORCHSCRIPT_MODEL_PATH, ACTION_LIMIT, replay_buffer) for _ in range(NUM_WORKERS)]
-    end_seq = time.time()
-    print(f"\nSequential initialization of {NUM_WORKERS} workers took: {end_seq - start_seq:.2f} seconds.\n", flush=True)
-
-
-    # --- ЭКСПЕРИМЕНТ 2: ПАРАЛЛЕЛЬНАЯ ИНИЦИАЛИЗАЦИЯ ---
-    print("\n--- Test 2: Parallel Initialization ---", flush=True)
+    # --- ЭТАП 1: Измерение скорости генерации данных ---
+    print(f"\n--- Step 1: Measuring data generation speed for {DATA_COLLECTION_SECONDS} seconds ---", flush=True)
     
-    def create_solver():
-        # Эта функция будет выполняться в каждом потоке
-        return DeepMCCFR(TORCHSCRIPT_MODEL_PATH, ACTION_LIMIT, replay_buffer)
+    stop_event = threading.Event()
+    
+    def run_worker(solver):
+        while not stop_event.is_set():
+            solver.run_traversal()
 
-    start_par = time.time()
+    initial_buffer_size = replay_buffer.get_count()
     with ThreadPoolExecutor(max_workers=NUM_WORKERS) as executor:
-        # Запускаем создание солверов параллельно
-        futures = [executor.submit(create_solver) for _ in range(NUM_WORKERS)]
-        # Собираем результаты, чтобы дождаться завершения всех
-        solvers_par = [future.result() for future in concurrent.futures.as_completed(futures)]
-    end_par = time.time()
-    print(f"\nParallel initialization of {NUM_WORKERS} workers took: {end_par - start_par:.2f} seconds.", flush=True)
+        futures = [executor.submit(run_worker, solver) for solver in solvers]
+        time.sleep(DATA_COLLECTION_SECONDS)
+        stop_event.set() # Посылаем сигнал остановки всем воркерам
     
-    print("\n--- ANALYSIS ---")
-    if (end_seq - start_seq) > 0.01: # Добавляем проверку, чтобы избежать деления на ноль
-        slowdown_factor = (end_par - start_par) / (end_seq - start_seq)
-        print(f"The difference is significant. Parallel loading is {slowdown_factor:.2f}x slower due to resource contention.")
-    else:
-        print("Sequential loading was too fast to measure, cannot calculate slowdown factor.")
-    print("Check the C++ output above to see individual thread loading times.")
+    final_buffer_size = replay_buffer.get_count()
+    samples_generated = final_buffer_size - initial_buffer_size
+    
+    gen_throughput = samples_generated / DATA_COLLECTION_SECONDS
+    time_per_gen_sample_ms = (1 / gen_throughput) * 1000 if gen_throughput > 0 else float('inf')
 
-    # --- Запуск короткого цикла сбора данных для проверки работоспособности ---
-    print("\n--- Running a short data collection cycle ---", flush=True)
-    start_run = time.time()
-    with ThreadPoolExecutor(max_workers=NUM_WORKERS) as executor:
-        tasks_per_worker = TRAINING_BLOCK_SIZE // NUM_WORKERS
-        run_futures = [executor.submit(solver.run_traversal) for solver in solvers_par for _ in range(tasks_per_worker)]
-        concurrent.futures.wait(run_futures)
-    end_run = time.time()
+    print(f"Generated {samples_generated} samples in {DATA_COLLECTION_SECONDS}s.")
+    print(f"Pure C++ Generation Throughput: {gen_throughput:.2f} samples/sec")
+    print(f"Time per generated sample (T_generate): {time_per_gen_sample_ms:.6f} ms")
+
+    # --- ЭТАП 2: Измерение скорости пакетного инференса ---
+    print(f"\n--- Step 2: Measuring batch inference speed (batch size = {INFERENCE_BATCH_SIZE}) ---", flush=True)
     
-    duration = end_run - start_run
-    throughput = replay_buffer.get_count() / duration if duration > 0 else 0
+    if samples_generated < INFERENCE_BATCH_SIZE:
+        print("Not enough samples generated to run inference test. Please increase DATA_COLLECTION_SECONDS.")
+        return
+
+    # Берем сэмплы из буфера
+    infosets_np, _ = replay_buffer.sample(INFERENCE_BATCH_SIZE)
+    infosets_tensor = torch.from_numpy(infosets_np).to(device)
+
+    # Прогрев
+    for _ in range(10):
+        _ = quantized_model(infosets_tensor)
+
+    # Замер
+    inference_start_time = time.time()
+    num_inference_runs = 50
+    for _ in range(num_inference_runs):
+        _ = quantized_model(infosets_tensor)
+    inference_end_time = time.time()
+
+    total_inference_time = inference_end_time - inference_start_time
+    time_per_batch_ms = (total_inference_time / num_inference_runs) * 1000
+    time_per_inf_sample_ms = time_per_batch_ms / INFERENCE_BATCH_SIZE
+
+    print(f"Executed {num_inference_runs} batches of size {INFERENCE_BATCH_SIZE} in {total_inference_time:.2f}s.")
+    print(f"Time per batch: {time_per_batch_ms:.4f} ms")
+    print(f"Time per inference sample (T_inference_batch): {time_per_inf_sample_ms:.6f} ms")
+
+    # --- ЭТАП 3: Прогноз ---
+    print("\n" + "="*40)
+    print("PERFORMANCE PREDICTION WITH BATCH INFERENCE")
+    print("="*40)
     
-    print(f"Data collection finished in {duration:.2f}s.")
-    print(f"Buffer size: {replay_buffer.get_count()}")
-    print(f"Throughput: {throughput:.2f} samples/sec")
+    predicted_total_time_ms = time_per_gen_sample_ms + time_per_inf_sample_ms
+    predicted_throughput = 1000 / predicted_total_time_ms if predicted_total_time_ms > 0 else float('inf')
+    
+    print(f"T_generate: {time_per_gen_sample_ms:.6f} ms")
+    print(f"T_inference_batch: {time_per_inf_sample_ms:.6f} ms")
+    print(f"Predicted total time per sample: {predicted_total_time_ms:.6f} ms")
+    print("-" * 40)
+    print(f"PREDICTED THROUGHPUT: {predicted_throughput:.2f} samples/sec")
+    print(f"Expected speedup over current ~1300 samples/sec: {predicted_throughput / 1300:.2f}x")
+    print("="*40)
 
 
 if __name__ == "__main__":
+    # Нужно импортировать threading для stop_event
+    import threading
     main()
