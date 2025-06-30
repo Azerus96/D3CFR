@@ -1,5 +1,3 @@
-// D2CFR-main/cpp_src/game_state.hpp (ВЕРСИЯ 5.0)
-
 #pragma once
 #include "board.hpp"
 #include <vector>
@@ -29,7 +27,8 @@ namespace ofc {
 
         std::pair<float, float> get_payoffs(const HandEvaluator& evaluator) const;
         
-        void get_legal_actions(size_t action_limit, std::vector<Action>& out_actions) const;
+        // ИЗМЕНЕНО: Принимает RNG как аргумент
+        void get_legal_actions(size_t action_limit, std::vector<Action>& out_actions, std::mt19937& rng) const;
         void apply_action(const Action& action, int player_view, UndoInfo& undo_info);
         void undo_action(const UndoInfo& undo_info, int player_view);
         
@@ -41,11 +40,13 @@ namespace ofc {
         const CardSet& get_my_discards(int player_idx) const { return my_discards_[player_idx]; }
         int get_opponent_discard_count(int player_idx) const { return opponent_discard_counts_[player_idx]; }
         int get_dealer_pos() const { return dealer_pos_; }
-        std::mt19937& get_rng() { return rng_; }
+        
+        // УДАЛЕНО: get_rng()
 
     private:
         void deal_cards();
-        void generate_random_placements(const CardSet& cards, Card discarded, std::vector<Action>& actions, size_t limit) const;
+        // ИЗМЕНЕНО: Принимает RNG как аргумент
+        void generate_random_placements(const CardSet& cards, Card discarded, std::vector<Action>& actions, size_t limit, std::mt19937& rng) const;
 
         int num_players_;
         int street_;
@@ -56,6 +57,6 @@ namespace ofc {
         CardSet dealt_cards_;
         std::vector<CardSet> my_discards_;
         std::vector<int> opponent_discard_counts_;
-        mutable std::mt19937 rng_;
+        // УДАЛЕНО: mutable std::mt19937 rng_;
     };
 }
