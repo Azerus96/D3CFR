@@ -1,6 +1,5 @@
-// D2CFR-main/cpp_src/DeepMCCFR.cpp (ВЕРСИЯ 7.0)
-
 #include "DeepMCCFR.hpp"
+#include "constants.hpp" // <-- ДОБАВЛЕНО
 #include <stdexcept>
 #include <iostream>
 #include <numeric>
@@ -8,9 +7,9 @@
 
 namespace ofc {
 
-// Конструктор больше не загружает модель
 DeepMCCFR::DeepMCCFR(size_t action_limit, SharedReplayBuffer* buffer, InferenceQueue* queue) 
-    : action_limit_(action_limit), replay_buffer_(buffer), inference_queue_(queue) {
+    : action_limit_(action_limit), replay_buffer_(buffer), inference_queue_(queue), rng_(std::random_device{}()) {
+    // Инициализируем RNG уникальным seed'ом для каждого потока
 }
 
 void DeepMCCFR::run_traversal() {
@@ -20,12 +19,11 @@ void DeepMCCFR::run_traversal() {
     traverse(state, 1);
 }
 
-// featurize остается без изменений
 std::vector<float> DeepMCCFR::featurize(const GameState& state, int player_view) {
     const Board& my_board = state.get_player_board(player_view);
     const Board& opp_board = state.get_opponent_board(player_view);
-    const int FEATURE_SIZE = 1486;
-    std::vector<float> features(FEATURE_SIZE, 0.0f);
+    // Используем константу из общего файла
+    std::vector<float> features(INFOSET_SIZE, 0.0f);
     int offset = 0;
     features[offset++] = static_cast<float>(state.get_street());
     features[offset++] = static_cast<float>(state.get_dealer_pos());
@@ -72,7 +70,7 @@ std::map<int, float> DeepMCCFR::traverse(GameState& state, int traversing_player
     int current_player = state.get_current_player();
     
     std::vector<Action> legal_actions;
-    state.get_legal_actions(action_limit_, legal_actions);
+    state.get_legal_actions(action_limit_, legal_actions, rng_); // <-- Передаем RNG
     
     int num_actions = legal_actions.size();
     UndoInfo undo_info;
@@ -85,33 +83,31 @@ std::map<int, float> DeepMCCFR::traverse(GameState& state, int traversing_player
     }
 
     if (current_player != traversing_player) {
-        int action_idx = state.get_rng()() % num_actions;
+        // Используем RNG, принадлежащий этому воркеру
+        int action_idx = std::uniform_int_distribution<int>(0, num_actions - 1)(rng_);
         state.apply_action(legal_actions[action_idx], traversing_player, undo_info);
         auto result = traverse(state, traversing_player);
         state.undo_action(undo_info, traversing_player);
         return result;
     }
 
+    // --- ЛУЧШАЯ ПРАКТИКА: ОДИН ВЫЗОВ FEATURIZE ---
     std::vector<float> infoset_vec = featurize(state, traversing_player);
     
-    // --- ИЗМЕНЕНИЕ: Пакетный инференс ---
     std::vector<float> regrets;
     {
-        // 1. Создаем promise, который будет ждать результат от Python
         std::promise<std::vector<float>> promise;
         std::future<std::vector<float>> future = promise.get_future();
 
-        // 2. Создаем запрос и отправляем его в очередь
         InferenceRequest request;
-        request.infoset = infoset_vec; // Копируем инфосет
+        request.infoset = infoset_vec; // Копируем инфосет, а не перемещаем
         request.promise = std::move(promise);
         request.num_actions = num_actions;
         inference_queue_->push(std::move(request));
 
-        // 3. Блокируемся и ждем, пока Python-поток не выполнит promise
         regrets = future.get();
     }
-    // ------------------------------------
+    // --- КОНЕЦ ИЗМЕНЕНИЯ ---
 
     std::vector<float> strategy(num_actions);
     float total_positive_regret = 0.0f;
@@ -144,6 +140,7 @@ std::map<int, float> DeepMCCFR::traverse(GameState& state, int traversing_player
         true_regrets[i] = action_utils[i][current_player] - node_util[current_player];
     }
     
+    // Используем инфосет, который мы сохранили ранее
     replay_buffer_->push(infoset_vec, true_regrets, num_actions);
 
     return node_util;
