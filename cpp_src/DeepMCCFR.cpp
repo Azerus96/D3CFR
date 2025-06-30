@@ -1,24 +1,16 @@
-// D2CFR-main/cpp_src/DeepMCCFR.cpp (ВЕРСИЯ ДЛЯ ТЕСТА ПАКЕТНОГО ИНФЕРЕНСА)
+// D2CFR-main/cpp_src/DeepMCCFR.cpp (ВЕРСИЯ 7.0)
 
 #include "DeepMCCFR.hpp"
 #include <stdexcept>
 #include <iostream>
 #include <numeric>
 #include <algorithm>
-#include <torch/torch.h>
 
 namespace ofc {
 
-// Конструктор остается без изменений, модель загружается, но не будет использоваться
-DeepMCCFR::DeepMCCFR(const std::string& model_path, size_t action_limit, SharedReplayBuffer* buffer) 
-    : action_limit_(action_limit), device_(torch::kCPU), replay_buffer_(buffer) {
-    try {
-        model_ = torch::jit::load(model_path);
-        model_.eval();
-        model_.to(device_);
-    } catch (const c10::Error& e) {
-        throw std::runtime_error("Failed to load LibTorch model: " + std::string(e.what()));
-    }
+// Конструктор больше не загружает модель
+DeepMCCFR::DeepMCCFR(size_t action_limit, SharedReplayBuffer* buffer, InferenceQueue* queue) 
+    : action_limit_(action_limit), replay_buffer_(buffer), inference_queue_(queue) {
 }
 
 void DeepMCCFR::run_traversal() {
@@ -102,10 +94,23 @@ std::map<int, float> DeepMCCFR::traverse(GameState& state, int traversing_player
 
     std::vector<float> infoset_vec = featurize(state, traversing_player);
     
-    // --- ЗАГЛУШКА ВМЕСТО ИНФЕРЕНСА ---
-    // Мы не вызываем модель, а просто создаем вектор с нулями.
-    // Это имитирует получение результата без затрат времени на вычисления.
-    std::vector<float> regrets(num_actions, 0.0f);
+    // --- ИЗМЕНЕНИЕ: Пакетный инференс ---
+    std::vector<float> regrets;
+    {
+        // 1. Создаем promise, который будет ждать результат от Python
+        std::promise<std::vector<float>> promise;
+        std::future<std::vector<float>> future = promise.get_future();
+
+        // 2. Создаем запрос и отправляем его в очередь
+        InferenceRequest request;
+        request.infoset = infoset_vec; // Копируем инфосет
+        request.promise = std::move(promise);
+        request.num_actions = num_actions;
+        inference_queue_->push(std::move(request));
+
+        // 3. Блокируемся и ждем, пока Python-поток не выполнит promise
+        regrets = future.get();
+    }
     // ------------------------------------
 
     std::vector<float> strategy(num_actions);
