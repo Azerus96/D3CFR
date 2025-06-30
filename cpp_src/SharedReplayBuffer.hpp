@@ -1,4 +1,4 @@
-// D2CFR-main/cpp_src/SharedReplayBuffer.hpp (ФИНАЛЬНАЯ ОПТИМИЗИРОВАННАЯ ВЕРСИЯ)
+// D2CFR-main/cpp_src/SharedReplayBuffer.hpp (ФИНАЛЬНАЯ КОРРЕКТНАЯ ВЕРСИЯ)
 
 #pragma once
 
@@ -47,6 +47,7 @@ public:
         std::fill(sample.target_regrets.begin(), sample.target_regrets.end(), 0.0f);
         
         if (num_actions > 0) {
+            // Копируем только num_actions элементов, так как regrets_vec имеет такой размер
             std::copy(regrets_vec.begin(), regrets_vec.end(), sample.target_regrets.begin());
         }
         sample.num_actions = num_actions;
@@ -59,7 +60,12 @@ public:
     void sample(int batch_size, float* out_infosets, float* out_regrets) {
         std::lock_guard<std::mutex> lock(mtx_);
         
-        if (count_ < static_cast<uint64_t>(batch_size)) return;
+        if (count_ < static_cast<uint64_t>(batch_size)) {
+            // Если данных не хватает, заполняем нулями, чтобы избежать падения в Python
+            std::fill(out_infosets, out_infosets + batch_size * INFOSET_SIZE, 0.0f);
+            std::fill(out_regrets, out_regrets + batch_size * action_limit_, 0.0f);
+            return;
+        }
 
         std::uniform_int_distribution<uint64_t> dist(0, count_ - 1);
 
