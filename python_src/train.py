@@ -147,7 +147,7 @@ def main():
             
             last_save_time = time.time()
             last_report_time = time.time()
-            last_buffer_size = 0
+            # last_buffer_size больше не нужен
             loss = None # Инициализируем loss
 
             while True:
@@ -156,8 +156,8 @@ def main():
                 current_buffer_size = replay_buffer.get_count()
                 now = time.time()
                 
-                # --- Обучение (ПРАВИЛЬНАЯ ЛОГИКА) ---
-                if current_buffer_size >= last_buffer_size + BATCH_SIZE:
+                # --- Обучение (ИСПРАВЛЕННАЯ ЛОГИКА) ---
+                if current_buffer_size >= BATCH_SIZE:
                     model.train()
                     infosets_np, targets_np = replay_buffer.sample(BATCH_SIZE)
                     
@@ -173,8 +173,6 @@ def main():
                     
                     inference_worker.set_model(model)
                     
-                    last_buffer_size = current_buffer_size
-                
                 # --- Отчет о производительности и сохранение ---
                 if now - last_report_time > 10.0:
                     duration = now - last_report_time
