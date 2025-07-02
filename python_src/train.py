@@ -27,14 +27,14 @@ from ofc_engine import DeepMCCFR, SharedReplayBuffer, InferenceQueue
 INPUT_SIZE = 1486 
 ACTION_LIMIT = 1000
 LEARNING_RATE = 0.001
-REPLAY_BUFFER_CAPACITY = 2_000_000
-BATCH_SIZE = 4096
+REPLAY_BUFFER_CAPACITY = 1_000_000
+BATCH_SIZE = 2048
 SAVE_INTERVAL_SECONDS = 300
 MODEL_PATH = "d2cfr_model.pth"
 
 # Параметры для пакетного инференса
-INFERENCE_BATCH_SIZE = 2048
-INFERENCE_MAX_DELAY_MS = 2
+INFERENCE_BATCH_SIZE = 1024
+INFERENCE_MAX_DELAY_MS = 10
 
 class InferenceWorker(threading.Thread):
     def __init__(self, model, queue, device):
