@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 import subprocess
 
 # --- НАСТРОЙКИ ---
-NUM_WORKERS = int(os.cpu_count() or 96) 
+NUM_WORKERS = int(os.cpu_count() or 88) 
 NUM_COMPUTATION_THREADS = "8"
 os.environ['OMP_NUM_THREADS'] = NUM_COMPUTATION_THREADS
 os.environ['OPENBLAS_NUM_THREADS'] = NUM_COMPUTATION_THREADS
@@ -34,7 +34,7 @@ MODEL_PATH = "d2cfr_model.pth"
 
 # Параметры для пакетного инференса
 INFERENCE_BATCH_SIZE = 1024
-INFERENCE_MAX_DELAY_MS = 10
+INFERENCE_MAX_DELAY_MS = 2
 
 class InferenceWorker(threading.Thread):
     def __init__(self, model, queue, device):
