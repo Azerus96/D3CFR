@@ -4,7 +4,7 @@
 #include "cpp_src/DeepMCCFR.hpp"
 #include "cpp_src/SharedReplayBuffer.hpp"
 #include "cpp_src/InferenceQueue.hpp"
-#include "cpp_src/constants.hpp" // <-- ДОБАВЛЕНО
+#include "cpp_src/constants.hpp"
 
 namespace py = pybind11;
 
@@ -26,6 +26,7 @@ PYBIND11_MODULE(ofc_engine, m) {
     py::class_<ofc::SharedReplayBuffer>(m, "SharedReplayBuffer")
         .def(py::init<uint64_t, int>(), py::arg("capacity"), py::arg("action_limit"))
         .def("get_count", &ofc::SharedReplayBuffer::get_count)
+        .def("get_head", &ofc::SharedReplayBuffer::get_head) // <-- ДОБАВЛЕНА ЭТА СТРОКА
         .def("get_max_actions", &ofc::SharedReplayBuffer::get_max_actions)
         .def("sample", [](ofc::SharedReplayBuffer &buffer, int batch_size) {
             int action_limit = buffer.get_max_actions();
