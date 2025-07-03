@@ -102,7 +102,8 @@ def push_to_github(model_path, commit_message):
         subprocess.run(['git', 'config', '--global', 'user.email', 'bot@example.com'], check=True)
         subprocess.run(['git', 'config', '--global', 'user.name', 'Training Bot'], check=True)
         subprocess.run(['git', 'add', model_path], check=True)
-        subprocess.run(['git', 'commit', '-m', commit_message], check=True)
+        # Добавляем --allow-empty, чтобы коммиты создавались, даже если файл модели не изменился
+        subprocess.run(['git', 'commit', '--allow-empty', '-m', commit_message], check=True)
         subprocess.run(['git', 'push'], check=True)
         print("Progress pushed successfully.", flush=True)
     except subprocess.CalledProcessError as e:
@@ -133,7 +134,6 @@ def main():
     solvers = [DeepMCCFR(ACTION_LIMIT, replay_buffer, inference_queue) for _ in range(NUM_WORKERS)]
     
     stop_event = threading.Event()
-    total_samples_generated = 0
     git_thread = None
 
     try:
@@ -147,41 +147,54 @@ def main():
             
             last_save_time = time.time()
             last_report_time = time.time()
-            # last_buffer_size больше не нужен
-            loss = None # Инициализируем loss
+            loss = None
+            
+            # ИЗМЕНЕНИЕ 1: Используем head_ для отслеживания прогресса
+            last_report_head = 0
+            last_train_head = 0
 
             while True:
-                time.sleep(0.1) 
+                # Спим немного, чтобы не перегружать основной поток и дать GIL другим потокам
+                time.sleep(0.01) 
                 
+                current_head = replay_buffer.get_head()
                 current_buffer_size = replay_buffer.get_count()
-                now = time.time()
                 
-                # --- Обучение (ИСПРАВЛЕННАЯ ЛОГИКА) ---
-                if current_buffer_size >= BATCH_SIZE:
-                    model.train()
-                    infosets_np, targets_np = replay_buffer.sample(BATCH_SIZE)
-                    
-                    infosets = torch.from_numpy(infosets_np).to(device)
-                    targets = torch.from_numpy(targets_np).to(device)
+                # ИЗМЕНЕНИЕ 2: Восстанавливаем сбалансированную логику обучения
+                if current_head >= last_train_head + BATCH_SIZE:
+                    # Убедимся, что в буфере достаточно данных (важно на самом старте)
+                    if current_buffer_size >= BATCH_SIZE:
+                        model.train()
+                        infosets_np, targets_np = replay_buffer.sample(BATCH_SIZE)
+                        
+                        infosets = torch.from_numpy(infosets_np).to(device)
+                        targets = torch.from_numpy(targets_np).to(device)
 
-                    optimizer.zero_grad()
-                    predictions = model(infosets)
-                    loss = criterion(predictions, targets)
-                    loss.backward()
-                    clip_grad_norm_(model.parameters(), 1.0)
-                    optimizer.step()
-                    
-                    inference_worker.set_model(model)
-                    
+                        optimizer.zero_grad()
+                        predictions = model(infosets)
+                        loss = criterion(predictions, targets)
+                        loss.backward()
+                        clip_grad_norm_(model.parameters(), 1.0)
+                        optimizer.step()
+                        
+                        inference_worker.set_model(model)
+                        
+                        # Обновляем счетчик после успешного шага обучения
+                        last_train_head = current_head
+                
                 # --- Отчет о производительности и сохранение ---
+                now = time.time()
                 if now - last_report_time > 10.0:
                     duration = now - last_report_time
-                    samples_generated_interval = current_buffer_size - total_samples_generated
-                    total_samples_generated = current_buffer_size
+                    
+                    # ИЗМЕНЕНИЕ 3: Исправляем логику подсчета производительности
+                    samples_generated_interval = current_head - last_report_head
+                    last_report_head = current_head
+                    
                     samples_per_sec = samples_generated_interval / duration if duration > 0 else 0
                     
                     print(f"\n--- Stats Update ---", flush=True)
-                    print(f"Throughput: {samples_per_sec:.2f} samples/s. Buffer: {current_buffer_size}/{REPLAY_BUFFER_CAPACITY}. Total generated: {total_samples_generated:,}", flush=True)
+                    print(f"Throughput: {samples_per_sec:.2f} samples/s. Buffer: {current_buffer_size}/{REPLAY_BUFFER_CAPACITY}. Total generated: {current_head:,}", flush=True)
                     
                     if loss is not None:
                         print(f"Last training loss: {loss.item():.6f}", flush=True)
@@ -195,7 +208,7 @@ def main():
                             if loss is not None:
                                 print("\n--- Saving model and pushing to GitHub ---", flush=True)
                                 torch.save(model.state_dict(), MODEL_PATH)
-                                commit_message = f"Training checkpoint. Total samples: {total_samples_generated:,}. Loss: {loss.item():.6f}"
+                                commit_message = f"Training checkpoint. Total samples: {current_head:,}. Loss: {loss.item():.6f}"
                                 
                                 git_thread = threading.Thread(target=push_to_github, args=(MODEL_PATH, commit_message))
                                 git_thread.start()
