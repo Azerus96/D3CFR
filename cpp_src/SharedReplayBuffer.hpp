@@ -6,11 +6,9 @@
 #include <algorithm>
 #include <iostream>
 #include <mutex>
-#include "constants.hpp" // <-- ИЗМЕНЕНО
+#include "constants.hpp"
 
 namespace ofc {
-
-// УДАЛЕНО: constexpr int INFOSET_SIZE = 1486;
 
 struct TrainingSample {
     std::vector<float> infoset_vector;
@@ -78,6 +76,16 @@ public:
         std::lock_guard<std::mutex> lock(mtx_);
         return count_;
     }
+
+    // --- ИЗМЕНЕНИЕ НАЧАТО ---
+    // Этот метод возвращает общее количество сэмплов, когда-либо добавленных в буфер.
+    // В отличие от get_count(), это значение никогда не перестает расти.
+    // Оно идеально подходит для отслеживания общего прогресса и производительности.
+    uint64_t get_head() {
+        std::lock_guard<std::mutex> lock(mtx_);
+        return head_;
+    }
+    // --- ИЗМЕНЕНИЕ ОКОНЧЕНО ---
     
     int get_max_actions() const {
         return action_limit_;
