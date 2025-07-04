@@ -9,24 +9,41 @@
 namespace py = pybind11;
 
 PYBIND11_MODULE(ofc_engine, m) {
-    m.doc() = "OFC Engine with Batch Inference";
+    m.doc() = "OFC Engine with Batch Inference and High-Performance Queues";
 
     py::class_<InferenceQueue>(m, "InferenceQueue")
         .def(py::init<>())
-        .def("pop_all", &InferenceQueue::pop_all)
-        .def("wait", &InferenceQueue::wait, py::call_guard<py::gil_scoped_release>());
+        // --- ИЗМЕНЕНИЕ ---
+        // Реализуем pop_all через неблокирующий try_dequeue_bulk.
+        // Это позволяет Python-потоку забрать все доступные элементы из очереди
+        // за один вызов, не блокируя C++ потоки.
+        .def("pop_all", [](InferenceQueue &q) {
+            // Оптимальный способ забрать все элементы из moodycamel::ConcurrentQueue
+            std::vector<InferenceRequest> requests;
+            // Выделяем память с запасом, чтобы избежать лишних реаллокаций.
+            // size_approx() - быстрая, но не всегда точная оценка размера.
+            requests.resize(q.size_approx()); 
+            // Пытаемся забрать все элементы. Метод вернет реальное количество.
+            size_t count = q.try_dequeue_bulk(requests.begin(), requests.size());
+            // Обрезаем вектор до реального количества полученных элементов.
+            requests.resize(count); 
+            return requests;
+        });
+        // Метод wait() удален, так как безблокировочные очереди
+        // не поддерживают блокирующего ожидания. Логика ожидания перенесена в Python.
 
     py::class_<InferenceRequest>(m, "InferenceRequest")
         .def_readonly("infoset", &InferenceRequest::infoset)
         .def_readonly("num_actions", &InferenceRequest::num_actions)
         .def("set_result", [](InferenceRequest &req, std::vector<float> result) {
+            // Этот код остается без изменений, он работает с std::promise
             req.promise.set_value(result);
         });
 
     py::class_<ofc::SharedReplayBuffer>(m, "SharedReplayBuffer")
         .def(py::init<uint64_t, int>(), py::arg("capacity"), py::arg("action_limit"))
         .def("get_count", &ofc::SharedReplayBuffer::get_count)
-        .def("get_head", &ofc::SharedReplayBuffer::get_head) // <-- ДОБАВЛЕНА ЭТА СТРОКА
+        .def("get_head", &ofc::SharedReplayBuffer::get_head)
         .def("get_max_actions", &ofc::SharedReplayBuffer::get_max_actions)
         .def("sample", [](ofc::SharedReplayBuffer &buffer, int batch_size) {
             int action_limit = buffer.get_max_actions();
