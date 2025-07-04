@@ -10,9 +10,20 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 import subprocess
 
+# --- ИЗМЕНЕНИЕ: Импорты и проверка доступности XLA (TPU) ---
+try:
+    import torch_xla
+    import torch_xla.core.xla_model as xm
+    XLA_AVAILABLE = True
+except ImportError:
+    XLA_AVAILABLE = False
+    print("Warning: torch_xla not found. Running on CPU. For TPU support, install torch_xla.")
+
 # --- НАСТРОЙКИ ---
-NUM_WORKERS = int(os.cpu_count() or 88) 
-NUM_COMPUTATION_THREADS = "8"
+# Для Colab TPU оптимально использовать все доступные ядра
+NUM_WORKERS = int(os.cpu_count() or 96) 
+# Настройки потоков для библиотек, чтобы избежать конфликтов
+NUM_COMPUTATION_THREADS = "8" 
 os.environ['OMP_NUM_THREADS'] = NUM_COMPUTATION_THREADS
 os.environ['OPENBLAS_NUM_THREADS'] = NUM_COMPUTATION_THREADS
 os.environ['MKL_NUM_THREADS'] = NUM_COMPUTATION_THREADS
@@ -34,7 +45,7 @@ MODEL_PATH = "d2cfr_model.pth"
 
 # Параметры для пакетного инференса
 INFERENCE_BATCH_SIZE = 2048
-INFERENCE_MAX_DELAY_MS = 2
+INFERENCE_MAX_DELAY_MS = 5 # Немного увеличим задержку для TPU
 
 class InferenceWorker(threading.Thread):
     def __init__(self, model, queue, device):
@@ -47,45 +58,46 @@ class InferenceWorker(threading.Thread):
 
     def set_model(self, model):
         with self.model_lock:
-            self.model = torch.quantization.quantize_dynamic(model.eval(), {torch.nn.Linear}, dtype=torch.qint8)
+            # Квантование может не поддерживаться XLA, поэтому используем .eval()
+            self.model = model.eval()
 
     def run(self):
-        print(f"InferenceWorker (ThreadID: {threading.get_ident()}) started.", flush=True)
-        requests = []
-        last_process_time = time.monotonic()
+        print(f"InferenceWorker (ThreadID: {threading.get_ident()}) started on device {self.device}.", flush=True)
         
         while not self.stop_event.is_set():
             try:
-                self.queue.wait() 
-                requests.extend(self.queue.pop_all())
+                # --- ИЗМЕНЕНИЕ: Неблокирующая логика опроса очереди ---
+                # 1. Забираем все, что есть в очереди, без ожидания
+                requests = self.queue.pop_all()
                 
+                # 2. Если очередь пуста, немного ждем, чтобы не сжигать CPU, и переходим к следующей итерации
                 if not requests:
+                    time.sleep(0.001)  # 1ms пауза
                     continue
-
-                current_time = time.monotonic()
-                time_since_last_process = (current_time - last_process_time) * 1000
-
-                if len(requests) >= INFERENCE_BATCH_SIZE or time_since_last_process > INFERENCE_MAX_DELAY_MS:
-                    self.process_batch(requests)
-                    requests.clear()
-                    last_process_time = current_time
+                
+                # 3. Если запросы есть, обрабатываем их
+                self.process_batch(requests)
 
             except Exception as e:
                 print(f"Error in InferenceWorker: {e}", flush=True)
                 traceback.print_exc()
         
-        if requests:
-            self.process_batch(requests)
+        # Обработка оставшихся запросов после сигнала остановки
+        final_requests = self.queue.pop_all()
+        if final_requests:
+            self.process_batch(final_requests)
 
         print(f"InferenceWorker (ThreadID: {threading.get_ident()}) stopped.", flush=True)
 
     def process_batch(self, requests):
+        if not requests:
+            return
+            
         infosets = [req.infoset for req in requests]
         tensor = torch.tensor(infosets, dtype=torch.float32).to(self.device)
 
-        with self.model_lock:
-            with torch.no_grad():
-                results_tensor = self.model(tensor)
+        with self.model_lock, torch.no_grad():
+            results_tensor = self.model(tensor)
         
         results_list = results_tensor.cpu().numpy()
 
@@ -102,7 +114,6 @@ def push_to_github(model_path, commit_message):
         subprocess.run(['git', 'config', '--global', 'user.email', 'bot@example.com'], check=True)
         subprocess.run(['git', 'config', '--global', 'user.name', 'Training Bot'], check=True)
         subprocess.run(['git', 'add', model_path], check=True)
-        # Добавляем --allow-empty, чтобы коммиты создавались, даже если файл модели не изменился
         subprocess.run(['git', 'commit', '--allow-empty', '-m', commit_message], check=True)
         subprocess.run(['git', 'push'], check=True)
         print("Progress pushed successfully.", flush=True)
@@ -112,14 +123,23 @@ def push_to_github(model_path, commit_message):
         print(f"An unexpected error occurred during git push: {e}", flush=True)
 
 def main():
-    device = torch.device("cpu")
+    # --- ИЗМЕНЕНИЕ: Автоматический выбор устройства TPU или CPU ---
+    if XLA_AVAILABLE:
+        device = xm.xla_device()
+        print(f"TPU device found: {device}", flush=True)
+    else:
+        device = torch.device("cpu")
+        print("TPU not found, using CPU.", flush=True)
+
     model = DuelingNetwork(input_size=INPUT_SIZE, max_actions=ACTION_LIMIT).to(device)
     
     if os.path.exists(MODEL_PATH):
         print(f"Found existing model at {MODEL_PATH}. Loading weights...", flush=True)
         try:
-            model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
-        except RuntimeError as e:
+            # При загрузке на XLA устройство, сначала грузим на CPU, а потом перемещаем
+            model.load_state_dict(torch.load(MODEL_PATH, map_location="cpu"))
+            model.to(device)
+        except Exception as e:
             print(f"Could not load state_dict. Error: {e}. Starting from scratch.", flush=True)
 
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
@@ -148,21 +168,16 @@ def main():
             last_save_time = time.time()
             last_report_time = time.time()
             loss = None
-            
-            # ИЗМЕНЕНИЕ 1: Используем head_ для отслеживания прогресса
             last_report_head = 0
             last_train_head = 0
 
             while True:
-                # Спим немного, чтобы не перегружать основной поток и дать GIL другим потокам
                 time.sleep(0.01) 
                 
                 current_head = replay_buffer.get_head()
                 current_buffer_size = replay_buffer.get_count()
                 
-                # ИЗМЕНЕНИЕ 2: Восстанавливаем сбалансированную логику обучения
                 if current_head >= last_train_head + BATCH_SIZE:
-                    # Убедимся, что в буфере достаточно данных (важно на самом старте)
                     if current_buffer_size >= BATCH_SIZE:
                         model.train()
                         infosets_np, targets_np = replay_buffer.sample(BATCH_SIZE)
@@ -174,27 +189,31 @@ def main():
                         predictions = model(infosets)
                         loss = criterion(predictions, targets)
                         loss.backward()
-                        clip_grad_norm_(model.parameters(), 1.0)
-                        optimizer.step()
+                        
+                        # --- ИЗМЕНЕНИЕ: Для XLA нужен специальный шаг оптимизатора ---
+                        if XLA_AVAILABLE:
+                            # xm.optimizer_step выполняет шаг градиентного спуска и синхронизацию с TPU
+                            xm.optimizer_step(optimizer)
+                        else:
+                            # Для CPU/GPU используем стандартный шаг
+                            clip_grad_norm_(model.parameters(), 1.0)
+                            optimizer.step()
                         
                         inference_worker.set_model(model)
-                        
-                        # Обновляем счетчик после успешного шага обучения
                         last_train_head = current_head
                 
-                # --- Отчет о производительности и сохранение ---
                 now = time.time()
                 if now - last_report_time > 10.0:
                     duration = now - last_report_time
-                    
-                    # ИЗМЕНЕНИЕ 3: Исправляем логику подсчета производительности
                     samples_generated_interval = current_head - last_report_head
                     last_report_head = current_head
-                    
                     samples_per_sec = samples_generated_interval / duration if duration > 0 else 0
                     
                     print(f"\n--- Stats Update ---", flush=True)
                     print(f"Throughput: {samples_per_sec:.2f} samples/s. Buffer: {current_buffer_size}/{REPLAY_BUFFER_CAPACITY}. Total generated: {current_head:,}", flush=True)
+                    
+                    if XLA_AVAILABLE:
+                        print(f"XLA Metrics: {xm.get_metrics_as_str()}", flush=True)
                     
                     if loss is not None:
                         print(f"Last training loss: {loss.item():.6f}", flush=True)
@@ -207,7 +226,11 @@ def main():
                         else:
                             if loss is not None:
                                 print("\n--- Saving model and pushing to GitHub ---", flush=True)
+                                # Для сохранения модели с TPU, ее нужно сначала переместить на CPU
+                                model.cpu()
                                 torch.save(model.state_dict(), MODEL_PATH)
+                                model.to(device) # Возвращаем модель на TPU
+                                
                                 commit_message = f"Training checkpoint. Total samples: {current_head:,}. Loss: {loss.item():.6f}"
                                 
                                 git_thread = threading.Thread(target=push_to_github, args=(MODEL_PATH, commit_message))
@@ -227,6 +250,7 @@ def main():
             git_thread.join()
 
         print("\n--- Final Save ---", flush=True)
+        model.cpu()
         torch.save(model.state_dict(), "d2cfr_model_final.pth")
         print("Final model saved. Exiting.")
 
