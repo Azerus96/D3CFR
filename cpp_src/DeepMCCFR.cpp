@@ -1,5 +1,5 @@
 #include "DeepMCCFR.hpp"
-#include "constants.hpp" // <-- ДОБАВЛЕНО
+#include "constants.hpp"
 #include <stdexcept>
 #include <iostream>
 #include <numeric>
@@ -22,7 +22,6 @@ void DeepMCCFR::run_traversal() {
 std::vector<float> DeepMCCFR::featurize(const GameState& state, int player_view) {
     const Board& my_board = state.get_player_board(player_view);
     const Board& opp_board = state.get_opponent_board(player_view);
-    // Используем константу из общего файла
     std::vector<float> features(INFOSET_SIZE, 0.0f);
     int offset = 0;
     features[offset++] = static_cast<float>(state.get_street());
@@ -70,7 +69,7 @@ std::map<int, float> DeepMCCFR::traverse(GameState& state, int traversing_player
     int current_player = state.get_current_player();
     
     std::vector<Action> legal_actions;
-    state.get_legal_actions(action_limit_, legal_actions, rng_); // <-- Передаем RNG
+    state.get_legal_actions(action_limit_, legal_actions, rng_);
     
     int num_actions = legal_actions.size();
     UndoInfo undo_info;
@@ -83,7 +82,6 @@ std::map<int, float> DeepMCCFR::traverse(GameState& state, int traversing_player
     }
 
     if (current_player != traversing_player) {
-        // Используем RNG, принадлежащий этому воркеру
         int action_idx = std::uniform_int_distribution<int>(0, num_actions - 1)(rng_);
         state.apply_action(legal_actions[action_idx], traversing_player, undo_info);
         auto result = traverse(state, traversing_player);
@@ -91,7 +89,6 @@ std::map<int, float> DeepMCCFR::traverse(GameState& state, int traversing_player
         return result;
     }
 
-    // --- ЛУЧШАЯ ПРАКТИКА: ОДИН ВЫЗОВ FEATURIZE ---
     std::vector<float> infoset_vec = featurize(state, traversing_player);
     
     std::vector<float> regrets;
@@ -100,14 +97,16 @@ std::map<int, float> DeepMCCFR::traverse(GameState& state, int traversing_player
         std::future<std::vector<float>> future = promise.get_future();
 
         InferenceRequest request;
-        request.infoset = infoset_vec; // Копируем инфосет, а не перемещаем
+        request.infoset = infoset_vec;
         request.promise = std::move(promise);
         request.num_actions = num_actions;
-        inference_queue_->push(std::move(request));
+        
+        // --- ИЗМЕНЕНИЕ ---
+        // Заменяем блокирующий `push` на неблокирующий `enqueue`
+        inference_queue_->enqueue(std::move(request));
 
         regrets = future.get();
     }
-    // --- КОНЕЦ ИЗМЕНЕНИЯ ---
 
     std::vector<float> strategy(num_actions);
     float total_positive_regret = 0.0f;
@@ -140,7 +139,6 @@ std::map<int, float> DeepMCCFR::traverse(GameState& state, int traversing_player
         true_regrets[i] = action_utils[i][current_player] - node_util[current_player];
     }
     
-    // Используем инфосет, который мы сохранили ранее
     replay_buffer_->push(infoset_vec, true_regrets, num_actions);
 
     return node_util;
