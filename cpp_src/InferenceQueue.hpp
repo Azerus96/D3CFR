@@ -1,49 +1,26 @@
 #pragma once
+
 #include <vector>
 #include <future>
-#include <mutex>
-#include <condition_variable>
-#include <deque>
+#include "concurrentqueue.h" // <-- Подключаем заголовок быстрой lock-free очереди
 
-// Запрос на инференс, который C++ отправляет в Python
+// Запрос на инференс, который C++ отправляет в Python.
+// Структура остается без изменений.
 struct InferenceRequest {
     std::vector<float> infoset;
     std::promise<std::vector<float>> promise;
     int num_actions;
 };
 
-// Потокобезопасная очередь для запросов
-class InferenceQueue {
-public:
-    void push(InferenceRequest&& request) {
-        std::unique_lock<std::mutex> lock(mtx_);
-        queue_.push_back(std::move(request));
-        lock.unlock();
-        cv_.notify_one();
-    }
-
-    // Забирает все запросы из очереди, не блокируя
-    std::vector<InferenceRequest> pop_all() {
-        std::vector<InferenceRequest> requests;
-        {
-            std::unique_lock<std::mutex> lock(mtx_);
-            if (!queue_.empty()) {
-                requests.reserve(queue_.size());
-                std::move(queue_.begin(), queue_.end(), std::back_inserter(requests));
-                queue_.clear();
-            }
-        }
-        return requests;
-    }
-
-    // Ждет, пока в очереди не появится хотя бы один элемент
-    void wait() {
-        std::unique_lock<std::mutex> lock(mtx_);
-        cv_.wait(lock, [this] { return !queue_.empty(); });
-    }
-
-private:
-    std::deque<InferenceRequest> queue_;
-    std::mutex mtx_;
-    std::condition_variable cv_;
-};
+// --- КЛЮЧЕВОЕ ИЗМЕНЕНИЕ ---
+// Вместо самописного класса с мьютексом, который является "бутылочным горлышком"
+// при большом количестве потоков, мы используем псевдоним (alias) для
+// moodycamel::ConcurrentQueue.
+//
+// Это одна из самых быстрых в мире реализаций безблокировочной (lock-free)
+// MPMC (Multi-Producer, Multi-Consumer) очереди. Она идеально подходит для
+// нашего сценария MPSC (96 продюсеров на C++, 1 консьюмер на Python).
+//
+// Это изменение должно кардинально повысить производительность, так как
+// 96 C++ потоков перестанут простаивать в ожидании блокировок.
+using InferenceQueue = moodycamel::ConcurrentQueue<InferenceRequest>;
